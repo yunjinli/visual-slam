@@ -1,0 +1,9 @@
+Language:       Cpp
+BasedOnStyle:   Google
+Standard:       Cpp11
+SortIncludes:   false
+ColumnLimit:    80
+
+# force the alignment of pointer/reference declarations
+DerivePointerAlignment: false
+PointerAlignment:       Left
