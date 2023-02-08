@@ -94,15 +94,26 @@ message(STATUS "Found TBB ${TBB_VERSION_MAJOR}.${TBB_VERSION_MINOR} (interface v
 
 # to use link to target "OpenCV"
 # NOTE: not specifying version, since 2, 3 or 4 is fine
-find_package(OpenCV REQUIRED COMPONENTS core features2d)
-message(STATUS "Found OpenCV ${OpenCV_VERSION} headers in: ${OpenCV_INCLUDE_DIRS}")
-add_library(OpenCV INTERFACE IMPORTED)
-set_property(TARGET OpenCV PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${OpenCV_INCLUDE_DIRS})
-set_property(TARGET OpenCV PROPERTY INTERFACE_LINK_LIBRARIES ${OpenCV_LIBS})
-if(OpenCV_VERSION VERSION_LESS 3)
-  set_property(TARGET OpenCV PROPERTY INTERFACE_COMPILE_DEFINITIONS DBATK_OPENCV2)
-endif()
+# find_package(OpenCV REQUIRED COMPONENTS core features2d)
+# message(STATUS "Found OpenCV ${OpenCV_VERSION} headers in: ${OpenCV_INCLUDE_DIRS}")
+# add_library(OpenCV INTERFACE IMPORTED)
+# set_property(TARGET OpenCV PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${OpenCV_INCLUDE_DIRS})
+# set_property(TARGET OpenCV PROPERTY INTERFACE_LINK_LIBRARIES ${OpenCV_LIBS})
+# if(OpenCV_VERSION VERSION_LESS 3)
+#   set_property(TARGET OpenCV PROPERTY INTERFACE_COMPILE_DEFINITIONS DBATK_OPENCV2)
+# endif()
 
+set(OPENCV_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/build-opencv")
+
+set(OPENCV_INCLUDE_DIR_HINTS ${OPENCV_ROOT})
+find_package(OpenCV REQUIRED CONFIG HINTS ${OPENCV_ROOT} NO_DEFAULT_PATH)
+
+set(OPENCV_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/opencv/include")
+include_directories(${OPENCV_INCLUDE_DIR})
+include_directories(include)
+
+message(STATUS "Found OpenCV ${OpenCV_VERSION} headers in: ${OPENCV_INCLUDE_DIR}")
+message(STATUS "Found Opencv headers in: ${OPENCV_INCLUDE_DIR}")
 
 
 # add_executable(test_ceres_se3 src/test_ceres_se3.cpp)
@@ -115,9 +126,10 @@ endif()
 # target_link_libraries(sfm Ceres::ceres pangolin TBB::tbb OpenCV opengv)
 
 add_executable(odometry src/odometry.cpp)
-target_link_libraries(odometry Ceres::ceres pangolin TBB::tbb OpenCV opengv)
-
+target_link_libraries(odometry Ceres::ceres pangolin TBB::tbb opengv ${OpenCV_LIBS})
+add_executable(feed_image_opencv src/feed_image_opencv.cpp)
+target_link_libraries(feed_image_opencv ${OpenCV_LIBS})
 
 
 enable_testing()
-# add_subdirectory(test)
+add_subdirectory(test)
