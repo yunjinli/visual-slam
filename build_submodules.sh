@@ -62,6 +62,7 @@ COMMON_CMAKE_ARGS=(
 BUILD_CERES=thirdparty/build-ceres-solver
 BUILD_PANGOLIN=thirdparty/build-Pangolin
 BUILD_OPENGV=thirdparty/build-opengv
+BUILD_OPENCV=thirdparty/build-opencv
 
 git submodule sync --recursive
 git submodule update --init --recursive
@@ -69,6 +70,7 @@ git submodule update --init --recursive
 rm -rf "$BUILD_CERES"
 rm -rf "$BUILD_PANGOLIN"
 rm -rf "$BUILD_OPENGV"
+rm -rf "$BUILD_OPENCV"
 
 mkdir -p "$BUILD_CERES"
 pushd "$BUILD_CERES"
@@ -100,3 +102,11 @@ cmake ../opengv "${COMMON_CMAKE_ARGS[@]}" \
     -DBUILD_TESTS=OFF
 make -j$NUM_PARALLEL_BUILDS opengv
 popd
+
+mkdir -p "$BUILD_OPENCV"
+pushd "$BUILD_OPENCV"
+cmake ../opencv "${COMMON_CMAKE_ARGS[@]}" \
+    -DBUILD_EXAMPLES=OFF 
+make -j$NUM_PARALLEL_BUILDS
+popd
+

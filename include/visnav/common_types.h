@@ -32,20 +32,18 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #pragma once
 
-#include <bitset>
-#include <cstdint>
-#include <map>
-#include <unordered_map>
-#include <vector>
-
 #include <tbb/concurrent_unordered_map.h>
 #include <tbb/concurrent_vector.h>
+#include <visnav/hash.h>
 
 #include <Eigen/Core>
 #include <Eigen/StdVector>
+#include <bitset>
+#include <cstdint>
+#include <map>
 #include <sophus/se3.hpp>
-
-#include <visnav/hash.h>
+#include <unordered_map>
+#include <vector>
 
 #define UNUSED(x) (void)(x)
 
@@ -172,7 +170,8 @@ using FeatureTracks = std::unordered_map<TrackId, FeatureTrack>;
 struct Camera {
   /// camera pose (transforms from camera to world)
   Sophus::SE3d T_w_c;
-
+  bool active;
+  // std::vector<FrameCamId> covisible_camera_fcids;
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 };
 
@@ -185,9 +184,16 @@ struct Landmark {
   /// This is a subset of the original feature track.
   FeatureTrack obs;
 
+  /// Keep track of all inlier observation of cameras even though the camera is
+  /// deactivated
+  FeatureTrack all_obs;
   /// Outlier observations in the current map.
   /// This is a subset of the original feature track.
   FeatureTrack outlier_obs;
+
+  /// If there's no keyframe observation,
+  /// deactivate the landmark.
+  bool active;
 };
 
 /// collection {imageId => Camera} for all cameras in the map
@@ -198,6 +204,13 @@ using Cameras =
 /// collection {trackId => Landmark} for all landmarks in the map.
 /// trackIds correspond to feature_tracks
 using Landmarks = std::unordered_map<TrackId, Landmark>;
+
+struct Keyframe {
+  Camera camera;
+  bool active;
+};
+
+using Keyframes = std::unordered_map<FrameCamId, Keyframe>;
 
 /// camera candidate to be added to map
 struct CameraCandidate {

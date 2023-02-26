@@ -32,26 +32,21 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #pragma once
 
-#include <fstream>
-#include <thread>
-
 #include <ceres/ceres.h>
+#include <visnav/common_types.h>
+#include <visnav/reprojection.h>
+#include <visnav/serialization.h>
+#include <visnav/tracks.h>
 
+#include <fstream>
 #include <opengv/absolute_pose/CentralAbsoluteAdapter.hpp>
 #include <opengv/absolute_pose/methods.hpp>
 #include <opengv/relative_pose/CentralRelativeAdapter.hpp>
 #include <opengv/sac/Ransac.hpp>
 #include <opengv/sac_problems/absolute_pose/AbsolutePoseSacProblem.hpp>
 #include <opengv/triangulation/methods.hpp>
-
-#include <visnav/common_types.h>
-#include <visnav/serialization.h>
-
-#include <visnav/reprojection.h>
+#include <thread>
 #include <visnav/local_parameterization_se3.hpp>
-#include <visnav/imu/preintegration.h>
-
-#include <visnav/tracks.h>
 
 namespace visnav {
 
@@ -336,14 +331,11 @@ struct BundleAdjustmentOptions {
 };
 
 // Run bundle adjustment to optimize cameras, points, and optionally intrinsics
-void bundle_adjustment(
-    const Corners& feature_corners, const BundleAdjustmentOptions& options,
-    const std::set<FrameCamId>& fixed_cameras, Calibration& calib_cam,
-    Cameras& cameras, Landmarks& landmarks,
-    Eigen::aligned_map<Timestamp, PoseVelState<double>>& states,
-    Eigen::aligned_map<Timestamp, IntegratedImuMeasurement<double>>&
-        imu_measurements,
-    bool use_imu) {
+void bundle_adjustment(const Corners& feature_corners,
+                       const BundleAdjustmentOptions& options,
+                       const std::set<FrameCamId>& fixed_cameras,
+                       Calibration& calib_cam, Cameras& cameras,
+                       Landmarks& landmarks) {
   ceres::Problem problem;
 
   // TODO SHEET 4: Setup optimization problem
@@ -397,67 +389,6 @@ void bundle_adjustment(
                                  calib_cam.intrinsics[fcid.cam_id]->data());
       }
     }
-  }
-
-  if (use_imu) {
-    // Add the parameter block first
-    if (states.size() == 3) {
-      for (auto& state : states) {
-        problem.AddParameterBlock(state.second.T_w_i.data(),
-                                  Sophus::SE3d::num_parameters,
-                                  new Sophus::test::LocalParameterizationSE3);
-      }
-      // Build the two residuals for the frames
-      int iter_counter = 0;
-      auto iter = states.rbegin();
-
-      while (iter_counter < 3) {
-        const IntegratedImuMeasurement<double>& imu_meas =
-            imu_measurements[iter->first];
-        visnav::PoseVelState<double>& state1 = states[iter->first];
-        ++iter;
-        visnav::PoseVelState<double>& state0 = states[iter->first];
-
-        // Build parameter blocks for frame optimization
-        //    problem.AddParameterBlock(state0.T_w_i.data(),
-        //    Sophus::SE3d::num_parameters,
-        //                              new
-        //                              Sophus::test::LocalParameterizationSE3);
-        //    problem.AddParameterBlock(state1.T_w_i.data(),
-        //    Sophus::SE3d::num_parameters,
-        //                              new
-        //                              Sophus::test::LocalParameterizationSE3);
-        // might have to add state[1] twice, because it appears in two residuals
-
-        BundleAdjustmentImuCostFunctor* imu_c =
-            new BundleAdjustmentImuCostFunctor(imu_meas.getDeltaState(),
-                                               visnav::constants::g,
-                                               state0.t_ns, state1.t_ns);
-        ceres::CostFunction* imu_cost_function =
-            new ceres::AutoDiffCostFunction<
-                BundleAdjustmentImuCostFunctor, 9,
-                Sophus::SE3d::num_parameters,  // state0.T_w_i
-                Sophus::SE3d::num_parameters,  // state1.T_w_i
-                3,                             // state0.vel_w_i
-                3                              // state1.vel_w_i
-                >(imu_c);
-
-        Eigen::Matrix<double, 3, 1> g = visnav::constants::g;
-        if (options.use_huber) {
-          problem.AddResidualBlock(
-              imu_cost_function, new ceres::HuberLoss(options.huber_parameter),
-              state0.T_w_i.data(), state1.T_w_i.data(), state0.vel_w_i.data(),
-              state1.vel_w_i.data());
-        } else {
-          problem.AddResidualBlock(imu_cost_function, NULL, state0.T_w_i.data(),
-                                   state1.T_w_i.data(), state0.vel_w_i.data(),
-                                   state1.vel_w_i.data());
-        }
-        iter_counter++;
-      }
-    }
-  } else {
-    // Do nothing here
   }
 
   if (!options.optimize_intrinsics) {

@@ -22,3 +22,6 @@
 [submodule "thirdparty/CLI11"]
 	path = thirdparty/CLI11
 	url = https://github.com/CLIUtils/CLI11.git
+[submodule "thirdparty/opencv"]
+	path = thirdparty/opencv
+	url = https://github.com/opencv/opencv.git
