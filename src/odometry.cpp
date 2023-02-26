@@ -30,45 +30,38 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#include <algorithm>
-#include <atomic>
-#include <chrono>
-#include <iostream>
-#include <sstream>
-#include <thread>
-
-#include <sophus/se3.hpp>
-
-#include <tbb/concurrent_unordered_map.h>
-
 #include <pangolin/display/image_view.h>
 #include <pangolin/gl/gldraw.h>
 #include <pangolin/image/image.h>
 #include <pangolin/image/image_io.h>
 #include <pangolin/image/typed_image.h>
 #include <pangolin/pangolin.h>
-
-#include <CLI/CLI.hpp>
-
-#include <visnav/common_types.h>
-
+#include <tbb/concurrent_unordered_map.h>
 #include <visnav/calibration.h>
-
+#include <visnav/common_types.h>
+#include <visnav/gui_helper.h>
+#include <visnav/imu/preintegration.h>
+#include <visnav/imu/utils/assert.h>
+#include <visnav/imu_dataset.h>
 #include <visnav/keypoints.h>
 #include <visnav/map_utils.h>
 #include <visnav/matching_utils.h>
+#include <visnav/serialization.h>
+#include <visnav/tracks.h>
 #include <visnav/vo_utils.h>
 
-#include <visnav/gui_helper.h>
-#include <visnav/tracks.h>
-
-#include <visnav/serialization.h>
-#include <visnav/imu/preintegration.h>
+#include <CLI/CLI.hpp>
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <iostream>
 #include <queue>
-#include "../include/visnav/imu/utils/calib_bias.hpp"
-#include <visnav/imu_dataset.h>
+#include <sophus/se3.hpp>
+#include <sstream>
+#include <thread>
+
 #include "../include/visnav/imu/imu_types.h"
-#include <visnav/imu/utils/assert.h>
+#include "../include/visnav/imu/utils/calib_bias.hpp"
 using namespace visnav;
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -274,8 +267,8 @@ Button alignSVD_btn("ui.align_svd", &align_svd);
 // process everything in non-gui mode).
 int main(int argc, char** argv) {
   bool show_gui = true;
-  std::string dataset_path = "data/V1_01_easy/mav0";
-  std::string cam_calib = "opt_calib.json";
+  std::string dataset_path = "../data/euroc_data/MH_01_easy/mav0";
+  std::string cam_calib = "../opt_calib.json";
   CLI::App app{"Visual odometry."};
 
   app.add_option("--show-gui", show_gui, "Show GUI");

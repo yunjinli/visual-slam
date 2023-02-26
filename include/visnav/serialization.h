@@ -32,12 +32,13 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #pragma once
 
+#include <visnav/calibration.h>
+#include <visnav/common_types.h>
+
 #include <Eigen/Dense>
-
-#include <cereal/cereal.hpp>
-
 #include <cereal/archives/binary.hpp>
 #include <cereal/archives/json.hpp>
+#include <cereal/cereal.hpp>
 #include <cereal/types/bitset.hpp>
 #include <cereal/types/map.hpp>
 #include <cereal/types/polymorphic.hpp>
@@ -45,9 +46,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <cereal/types/unordered_map.hpp>
 #include <cereal/types/utility.hpp>
 #include <cereal/types/vector.hpp>
-
-#include <visnav/calibration.h>
-#include <visnav/common_types.h>
 
 namespace cereal {
 
@@ -165,10 +163,7 @@ void serialize(Archive& ar, Sophus::SE3d& p) {
 
 template <class Archive>
 void serialize(Archive& ar, Calibration& cam) {
-  ar(CEREAL_NVP(cam.T_i_c), CEREAL_NVP(cam.intrinsics),
-     CEREAL_NVP(cam.calib_accel_bias), CEREAL_NVP(cam.calib_gyro_bias),
-     cam.imu_update_rate, CEREAL_NVP(cam.accel_noise_std),
-     CEREAL_NVP(cam.gyro_noise_std));
+  ar(CEREAL_NVP(cam.T_i_c), CEREAL_NVP(cam.intrinsics));
 }
 
 template <class Archive, class Scalar, class CamT>

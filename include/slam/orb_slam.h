@@ -1,5 +1,8 @@
 #pragma once
 
 namespace slam {
-class ORBSLAM {};
+class ORBSLAM {
+ public:
+ private:
+};
 }  // namespace slam

@@ -32,11 +32,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #pragma once
 
-#include <set>
-
-#include <visnav/common_types.h>
-
 #include <visnav/calibration.h>
+#include <visnav/common_types.h>
 
 #include <opengv/absolute_pose/CentralAbsoluteAdapter.hpp>
 #include <opengv/absolute_pose/methods.hpp>
@@ -44,6 +41,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <opengv/sac/Ransac.hpp>
 #include <opengv/sac_problems/absolute_pose/AbsolutePoseSacProblem.hpp>
 #include <opengv/triangulation/methods.hpp>
+#include <set>
 
 namespace visnav {
 
@@ -112,7 +110,7 @@ void find_matches_landmarks(
         // The projected point is within the circle
         const TrackId& t_id = projected_track_ids[projected_p_idx];
         int minimal_dist = 256;
-        for (const auto& ob : landmarks.at(t_id).obs) {
+        for (const auto& ob : landmarks.at(t_id).all_obs) {
           const FrameCamId& fcid = ob.first;
           const FeatureId& f_id = ob.second;
           int feature_match_dist =
@@ -247,21 +245,18 @@ void add_new_landmarks(const FrameCamId fcidl, const FrameCamId fcidr,
   // next_landmark_id is a running index of the landmarks, so after adding a new
   // landmark you should always increase next_landmark_id by 1.
   for (auto& kv : md.inliers) {  // In this frame
-    const FeatureId& f_id = kv.first;
-    const TrackId& t_id = kv.second;
+    const FeatureId f_id = kv.first;
+    const TrackId t_id = kv.second;
     if (landmarks.count(t_id) > 0)  // landmark exists
     {
       landmarks.at(t_id).obs.emplace(std::make_pair(fcidl, f_id));
-      //      if (pairExist(md_stereo.inliers,
-      //                    f_id))  // if feature id also exist in stereo pair
-      //      {
-      //        landmarks.at(t_id).obs.emplace(
-      //            std::make_pair(fcidr, md_stereo.inliers.at(f_id).second));
-      //      }
+      landmarks.at(t_id).all_obs.emplace(std::make_pair(fcidl, f_id));
       // Check if feature id also exist in stereo pair
       for (auto& inlier_pair : md_stereo.inliers) {
         if (inlier_pair.first == f_id) {
           landmarks.at(t_id).obs.emplace(
+              std::make_pair(fcidr, inlier_pair.second));
+          landmarks.at(t_id).all_obs.emplace(
               std::make_pair(fcidr, inlier_pair.second));
           break;
         }
@@ -270,8 +265,8 @@ void add_new_landmarks(const FrameCamId fcidl, const FrameCamId fcidr,
     }
   }
   for (auto& kv : md_stereo.inliers) {
-    const FeatureId& f_idl = kv.first;
-    const FeatureId& f_idr = kv.second;
+    const FeatureId f_idl = kv.first;
+    const FeatureId f_idr = kv.second;
     int counter = 0;
     for (auto& fid_tid : md.inliers) {
       const FeatureId& fid = fid_tid.first;
@@ -299,20 +294,22 @@ void add_new_landmarks(const FrameCamId fcidl, const FrameCamId fcidr,
           md.T_w_c * opengv::triangulation::triangulate(adapter, 0);
       Landmark l;
       l.p = point;
+      l.active = true;
       l.obs.emplace(std::make_pair(fcidl, f_idl));
       l.obs.emplace(std::make_pair(fcidr, f_idr));
-      landmarks.emplace(std::make_pair(next_landmark_id++, l));
+      l.all_obs.emplace(std::make_pair(fcidl, f_idl));
+      l.all_obs.emplace(std::make_pair(fcidr, f_idr));
+      landmarks.emplace(std::make_pair(next_landmark_id, l));
+      next_landmark_id++;
     }
   }
 }
 
-bool remove_old_keyframes(const FrameCamId fcidl, const int max_num_kfs,
+void remove_old_keyframes(const FrameCamId fcidl, const int max_num_kfs,
                           Cameras& cameras, Landmarks& landmarks,
-                          Landmarks& old_landmarks,
-                          std::set<FrameId>& kf_frames, Camera& removed_camera,
-                          FrameId& removed_fid) {
+                          // Landmarks& old_landmarks,
+                          std::set<FrameId>& kf_frames) {
   kf_frames.emplace(fcidl.frame_id);
-  bool removed = false;
   // TODO SHEET 5: Remove old cameras and observations if the number of keyframe
   // pairs (left and right image is a pair) is larger than max_num_kfs. The ids
   // of all the keyframes that are currently in the optimization should be
@@ -323,32 +320,33 @@ bool remove_old_keyframes(const FrameCamId fcidl, const int max_num_kfs,
     auto kf_id = *kf_frames.begin();
     kf_frames.erase(kf_ptr);
     std::set<FrameCamId> removed_cameras = {{kf_id, 0}, {kf_id, 1}};
-    FrameCamId rfcid(kf_id, 0);
-    removed_camera = cameras.at(rfcid);
-    removed_fid = kf_id;
     for (auto& fcid : removed_cameras) {
-      cameras.erase(fcid);
+      // cameras.erase(fcid);
+      cameras.at(fcid).active = false;
     }
     for (auto& tid_lm : landmarks) {
       for (auto& fcid : removed_cameras) {
-        tid_lm.second.obs.erase(fcid);
+        if (tid_lm.second.obs.count(fcid)) {
+          tid_lm.second.obs.erase(fcid);
+        }
       }
     }
-    removed = true;
   }
-  std::vector<TrackId> removed_lm_id;
+  // std::vector<TrackId> removed_lm_id;
   for (auto& tid_lm : landmarks) {
     if (tid_lm.second.obs.size() == 0) {
-      TrackId old_tid = tid_lm.first;
-      Landmark old_lm = tid_lm.second;
-      old_landmarks.emplace(std::make_pair(old_tid, old_lm));
-      removed_lm_id.push_back(tid_lm.first);
+      // TrackId old_tid = tid_lm.first;
+      // Landmark old_lm = tid_lm.second;
+      // old_landmarks.emplace(std::make_pair(old_tid, old_lm));
+      // removed_lm_id.push_back(tid_lm.first);
       //      landmarks.erase(tid_lm.first);
+      tid_lm.second.active = false;
+    } else {
+      tid_lm.second.active = true;
     }
   }
-  for (int i = 0; i < removed_lm_id.size(); i++) {
-    landmarks.erase(removed_lm_id[i]);
-  }
-  return removed;
+  // for (int i = 0; i < removed_lm_id.size(); i++) {
+  //   landmarks.erase(removed_lm_id[i]);
+  // }
 }
 }  // namespace visnav
