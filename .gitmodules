@@ -25,3 +25,6 @@
 [submodule "thirdparty/opencv"]
 	path = thirdparty/opencv
 	url = https://github.com/opencv/opencv.git
+[submodule "thirdparty/DBoW2"]
+	path = thirdparty/DBoW2
+	url = https://github.com/dorian3d/DBoW2.git
