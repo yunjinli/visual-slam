@@ -34,6 +34,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <tbb/concurrent_unordered_map.h>
 #include <tbb/concurrent_vector.h>
+#include <visnav/ORBVocabulary.h>
 #include <visnav/hash.h>
 
 #include <Eigen/Core>
@@ -41,10 +42,10 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <bitset>
 #include <cstdint>
 #include <map>
+#include <opencv2/opencv.hpp>
 #include <sophus/se3.hpp>
 #include <unordered_map>
 #include <vector>
-
 #define UNUSED(x) (void)(x)
 
 namespace visnav {
@@ -111,13 +112,24 @@ struct KeypointsData {
   /// collection of 2d corner points (indexed by FeatureId)
   std::vector<Eigen::Vector2d, Eigen::aligned_allocator<Eigen::Vector2d>>
       corners;
-  /// collection of feature orientation (in radian) with same index as `corners`
+  /// collection of feature orientation (in radian) with same index as
+  // `corners`
   /// (indexed by FeatureId)
   std::vector<double> corner_angles;
   /// collection of feature descriptors with same index as `corners` (indexed by
   /// FeatureId)
   std::vector<std::bitset<256>> corner_descriptors;
 };
+/// keypoint positions and descriptors for an image
+// struct KeypointsData {
+//   /// collection of 2d corner points (indexed by FeatureId)
+//   std::vector<Eigen::Vector2d, Eigen::aligned_allocator<Eigen::Vector2d>>
+//       corners;
+//   /// collection of feature descriptors with same index as `corners` (indexed
+//   by
+//   /// FeatureId)
+//   cv::Mat corner_descriptors;
+// };
 
 /// feature corners is a collection of { imageId => KeypointsData }
 using Corners = tbb::concurrent_unordered_map<FrameCamId, KeypointsData>;
@@ -166,15 +178,48 @@ using FeatureTrack = std::map<FrameCamId, FeatureId>;
 /// FeatureTracks is a collection {TrackId => FeatureTrack}
 using FeatureTracks = std::unordered_map<TrackId, FeatureTrack>;
 
+/// Word id for BoW.
+using WordId = unsigned int;
+
+/// Value of a word
+using WordValue = double;
+
+/// Normalized sparse vector of words to represent images. "Sparse" means that
+/// words with value 0 don't appear explicitly.
+using BowVector = std::vector<std::pair<WordId, WordValue>>;
+
+/// Result of BoW query. Should be sorted by the confidence.
+using BowQueryResult = std::vector<std::pair<FrameCamId, double>>;
+
+/// Inverse index used in Bow database. Not suited for concurrent computation.
+using BowDBInverseIndex =
+    std::unordered_map<WordId, std::vector<std::pair<FrameCamId, WordValue>>>;
+
+/// Inverse index used in Bow database. Suited for concurrent computation.
+using BowDBInverseIndexConcurrent = tbb::concurrent_unordered_map<
+    WordId, tbb::concurrent_vector<std::pair<FrameCamId, WordValue>>>;
+
+using DBoWInvertedFile = std::vector<std::vector<FrameCamId>>;
 /// cameras in the map
 struct Camera {
   /// camera pose (transforms from camera to world)
   Sophus::SE3d T_w_c;
   bool active;
   // std::vector<FrameCamId> covisible_camera_fcids;
+  std::map<FrameCamId, int> covisible_weights;
+  FrameCamId last_fcid;
+  // BowVector bow_vector;
+  DBoW2::BowVector bow_vector;
+  DBoW2::FeatureVector feature_vector;
+  // Associated landmarks with keypoins
+  std::map<TrackId, FeatureId> map_points;
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 };
 
+using CovisibilityGraph = std::unordered_map<FrameCamId, std::set<FrameCamId>>;
+
+using ConsistentGroup = std::pair<std::set<FrameCamId>, int>;
+using ConsistentGroups = std::vector<ConsistentGroup>;
 /// landmarks in the map
 struct Landmark {
   /// 3d position in world coordinates
@@ -204,13 +249,6 @@ using Cameras =
 /// collection {trackId => Landmark} for all landmarks in the map.
 /// trackIds correspond to feature_tracks
 using Landmarks = std::unordered_map<TrackId, Landmark>;
-
-struct Keyframe {
-  Camera camera;
-  bool active;
-};
-
-using Keyframes = std::unordered_map<FrameCamId, Keyframe>;
 
 /// camera candidate to be added to map
 struct CameraCandidate {
@@ -302,27 +340,6 @@ using ImageProjections = std::map<FrameCamId, ImageProjection>;
 using TrackProjections =
     std::unordered_map<TrackId,
                        std::map<FrameCamId, ProjectedLandmarkConstPtr>>;
-
-/// Word id for BoW.
-using WordId = unsigned int;
-
-/// Value of a word
-using WordValue = double;
-
-/// Normalized sparse vector of words to represent images. "Sparse" means that
-/// words with value 0 don't appear explicitly.
-using BowVector = std::vector<std::pair<WordId, WordValue>>;
-
-/// Result of BoW query. Should be sorted by the confidence.
-using BowQueryResult = std::vector<std::pair<FrameCamId, double>>;
-
-/// Inverse index used in Bow database. Not suited for concurrent computation.
-using BowDBInverseIndex =
-    std::unordered_map<WordId, std::vector<std::pair<FrameCamId, WordValue>>>;
-
-/// Inverse index used in Bow database. Suited for concurrent computation.
-using BowDBInverseIndexConcurrent = tbb::concurrent_unordered_map<
-    WordId, tbb::concurrent_vector<std::pair<FrameCamId, WordValue>>>;
 
 }  // namespace visnav
 

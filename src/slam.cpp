@@ -29,7 +29,6 @@ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
-
 #include <pangolin/display/image_view.h>
 #include <pangolin/gl/gldraw.h>
 #include <pangolin/image/image.h>
@@ -37,6 +36,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <pangolin/image/typed_image.h>
 #include <pangolin/pangolin.h>
 #include <tbb/concurrent_unordered_map.h>
+#include <visnav/ORBVocabulary.h>
+// #include <visnav/bow_voc.h>
 #include <visnav/calibration.h>
 #include <visnav/common_types.h>
 #include <visnav/gui_helper.h>
@@ -53,11 +54,11 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <atomic>
 #include <chrono>
 #include <iostream>
+#include <opencv2/opencv.hpp>
 #include <queue>
 #include <sophus/se3.hpp>
 #include <sstream>
 #include <thread>
-
 using namespace visnav;
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -66,6 +67,7 @@ using namespace visnav;
 
 void draw_image_overlay(pangolin::View& v, size_t view_id);
 void change_display_to_image(const FrameCamId& fcid);
+void get_current_openGL_camera_matrix(pangolin::OpenGlMatrix& M);
 void draw_scene();
 void load_data(const std::string& path, const std::string& calib_path);
 bool next_step();
@@ -82,6 +84,10 @@ constexpr int NUM_CAMS = 2;
 ///////////////////////////////////////////////////////////////////////////////
 /// Variables
 ///////////////////////////////////////////////////////////////////////////////
+
+// OpenCv object
+cv::Ptr<cv::ORB> orb;
+// cv::BFMatcher matcher(cv::NORM_HAMMING);
 
 int current_frame = 0;
 Sophus::SE3d current_pose;
@@ -114,6 +120,11 @@ Matches feature_matches;
 /// camera poses in the current map
 Cameras cameras;
 
+/// Covisibility Graph
+CovisibilityGraph graph;
+/// last keyframe
+// Camera* last_keyframe = nullptr;
+FrameCamId last_kf_fcid(-1, 0);
 /// camera poses that's been discarded
 // Cameras deactive_cameras;
 
@@ -137,7 +148,21 @@ Landmarks landmarks_opt;
 /// determining outliers; indexed by images
 ImageProjections image_projections;
 
-std::vector<std::pair<FrameCamId, FrameCamId>> covisible_pair;
+/// Vocabulary for building BoW representations.
+// std::shared_ptr<BowVocabulary> bow_voc;
+ORBVocabulary* orb_voc;
+DBoWInvertedFile orb_db;
+/// Database for BoW lookup.
+// std::shared_ptr<BowDatabase> bow_db;
+
+/// For loop closure
+ConsistentGroups consistent_groups;
+std::vector<FrameCamId> enough_consistent_candidates;
+std::vector<std::pair<FrameCamId, FrameCamId>> loop_edges;
+bool loop_detected = false;
+
+// For visualization
+pangolin::OpenGlMatrix M;
 ///////////////////////////////////////////////////////////////////////////////
 /// GUI parameters
 ///////////////////////////////////////////////////////////////////////////////
@@ -162,6 +187,7 @@ pangolin::Var<bool> show_inliers("ui.show_inliers", true, true);
 pangolin::Var<bool> show_reprojections("ui.show_reprojections", true, true);
 pangolin::Var<bool> show_outlier_observations("ui.show_outlier_obs", false,
                                               true);
+pangolin::Var<bool> follow_frame("ui.follow_frame", false, true);
 pangolin::Var<bool> show_ids("ui.show_ids", false, true);
 pangolin::Var<bool> show_epipolar("hidden.show_epipolar", false, true);
 pangolin::Var<bool> show_cameras3d("hidden.show_cameras", true, true);
@@ -173,8 +199,7 @@ pangolin::Var<bool> show_vio_pt("hidden.show_vio_pt", false, true);
 //////////////////////////////////////////////
 /// Feature extraction and matching options
 
-pangolin::Var<int> num_features_per_image("hidden.num_features", 1500, 10,
-                                          5000);
+pangolin::Var<int> num_features_per_image("hidden.num_features", 500, 10, 5000);
 pangolin::Var<bool> rotate_features("hidden.rotate_features", true, true);
 pangolin::Var<int> feature_match_max_dist("hidden.match_max_dist", 70, 1, 255);
 pangolin::Var<double> feature_match_test_next_best("hidden.match_next_best",
@@ -195,7 +220,11 @@ pangolin::Var<bool> show_all_keyframes("hidden.show_all_keyframes", true, true);
 // pangolin::Var<double> covisible_threshold("hidden.covisible_threshold", 0.1,
 //                                           0.0, 1.0);
 pangolin::Var<int> num_cov_threshold("hidden.num_cov_threshold", 15, 1, 100);
-
+pangolin::Var<bool> show_cov("hidden.show_cov", true, true);
+pangolin::Var<int> num_ess_threshold("hidden.num_ess_threshold", 30, 1, 100);
+pangolin::Var<bool> show_essential("hidden.show_essential", false, true);
+pangolin::Var<bool> show_spanning_tree("hidden.show_spanning_tree", true, true);
+pangolin::Var<int> num_consistency("hidden.num_consistency", 3, 1, 15);
 //////////////////////////////////////////////
 /// Adding cameras and landmarks options
 
@@ -231,8 +260,10 @@ Button next_step_btn("ui.next_step", &next_step);
 // process everything in non-gui mode).
 int main(int argc, char** argv) {
   bool show_gui = true;
+
   std::string dataset_path = "../data/V1_01_easy/mav0/";
   std::string cam_calib = "../opt_calib.json";
+  std::string voc_path = "../Vocabulary/ORBvoc.txt";
   CLI::App app{"Visual odometry."};
 
   app.add_option("--show-gui", show_gui, "Show GUI");
@@ -240,12 +271,32 @@ int main(int argc, char** argv) {
                  "Dataset path. Default: " + dataset_path);
   app.add_option("--cam-calib", cam_calib,
                  "Path to camera calibration. Default: " + cam_calib);
+  app.add_option("--voc-path", voc_path, "Vocabulary path");
+
+  // orb = cv::ORB::create(num_features_per_image, 1.2, 8, 19, 0, 2,
+  //                       cv::ORB::FAST_SCORE);
+
   try {
     app.parse(argc, argv);
   } catch (const CLI::ParseError& e) {
     return app.exit(e);
   }
+  // if (!voc_path.empty()) {
+  //   bow_voc.reset(new BowVocabulary(voc_path));
+  //   bow_db.reset(new BowDatabase);
+  // }
 
+  // Load ORB Vocabulary
+
+  orb_voc = new ORBVocabulary();
+  bool voc_load = orb_voc->loadFromTextFile(voc_path);
+  if (!voc_load) {
+    std::cerr << "Wrong path to vocabulary. " << std::endl;
+    std::cerr << "Falied to open at: " << voc_path << std::endl;
+    exit(-1);
+  }
+  std::cout << "Vocabulary loaded!" << std::endl << std::endl;
+  orb_db.resize(orb_voc->size());
   load_data(dataset_path, cam_calib);
 
   if (show_gui) {
@@ -288,11 +339,14 @@ int main(int argc, char** argv) {
     }
 
     // 3D visualization (initial camera view optimized to see full map)
+    // pangolin::OpenGlRenderState camera(
+    //     pangolin::ProjectionMatrix(640, 480, 400, 400, 320, 240, 0.001,
+    //     10000), pangolin::ModelViewLookAt(-3.4, -3.7, -8.3, 2.1, 0.6, 0.2,
+    //                               pangolin::AxisNegY));
+
     pangolin::OpenGlRenderState camera(
         pangolin::ProjectionMatrix(640, 480, 400, 400, 320, 240, 0.001, 10000),
-        pangolin::ModelViewLookAt(-3.4, -3.7, -8.3, 2.1, 0.6, 0.2,
-                                  pangolin::AxisNegY));
-
+        pangolin::ModelViewLookAt(0, -0.7, -1.8, 0, 0, 0, 0.0, -1.0, 0.0));
     pangolin::View& display3D =
         pangolin::Display("scene")
             .SetAspect(-640 / 480.0)
@@ -310,7 +364,13 @@ int main(int argc, char** argv) {
 
       display3D.Activate(camera);
       glClearColor(0.95f, 0.95f, 0.95f, 1.0f);  // light gray background
-
+      if (follow_frame) {
+        // camera.SetModelViewMatrix(
+        //     pangolin::ModelViewLookAt(0, -0.7, -1.8, 0, 0, 0, 0.0, -1.0,
+        //     0.0));
+        get_current_openGL_camera_matrix(M);
+        camera.Follow(M);
+      }
       draw_scene();
 
       img_view_display.Activate();
@@ -403,14 +463,14 @@ void draw_image_overlay(pangolin::View& v, size_t view_id) {
 
       for (size_t i = 0; i < cr.corners.size(); i++) {
         Eigen::Vector2d c = cr.corners[i];
-        double angle = cr.corner_angles[i];
+        // double angle = cr.corner_angles[i];
         pangolin::glDrawCirclePerimeter(c[0], c[1], 3.0);
 
-        Eigen::Vector2d r(3, 0);
-        Eigen::Rotation2Dd rot(angle);
-        r = rot * r;
+        // Eigen::Vector2d r(3, 0);
+        // Eigen::Rotation2Dd rot(angle);
+        // r = rot * r;
 
-        pangolin::glDrawLine(c, c + r);
+        // pangolin::glDrawLine(c, c + r);
       }
 
       pangolin::GlFont::I()
@@ -459,14 +519,14 @@ void draw_image_overlay(pangolin::View& v, size_t view_id) {
                                   : it->second.matches[i].second;
 
           Eigen::Vector2d c = cr.corners[c_idx];
-          double angle = cr.corner_angles[c_idx];
+          // double angle = cr.corner_angles[c_idx];
           pangolin::glDrawCirclePerimeter(c[0], c[1], 3.0);
 
-          Eigen::Vector2d r(3, 0);
-          Eigen::Rotation2Dd rot(angle);
-          r = rot * r;
+          // Eigen::Vector2d r(3, 0);
+          // Eigen::Rotation2Dd rot(angle);
+          // r = rot * r;
 
-          pangolin::glDrawLine(c, c + r);
+          // pangolin::glDrawLine(c, c + r);
 
           if (show_ids) {
             pangolin::GlFont::I().Text("%d", i).Draw(c[0], c[1]);
@@ -491,14 +551,14 @@ void draw_image_overlay(pangolin::View& v, size_t view_id) {
                                   : it->second.inliers[i].second;
 
           Eigen::Vector2d c = cr.corners[c_idx];
-          double angle = cr.corner_angles[c_idx];
+          // double angle = cr.corner_angles[c_idx];
           pangolin::glDrawCirclePerimeter(c[0], c[1], 3.0);
 
-          Eigen::Vector2d r(3, 0);
-          Eigen::Rotation2Dd rot(angle);
-          r = rot * r;
+          // Eigen::Vector2d r(3, 0);
+          // Eigen::Rotation2Dd rot(angle);
+          // r = rot * r;
 
-          pangolin::glDrawLine(c, c + r);
+          // pangolin::glDrawLine(c, c + r);
 
           if (show_ids) {
             pangolin::GlFont::I().Text("%d", i).Draw(c[0], c[1]);
@@ -637,6 +697,28 @@ void change_display_to_image(const FrameCamId& fcid) {
   }
 }
 
+void get_current_openGL_camera_matrix(pangolin::OpenGlMatrix& M) {
+  const double* data = current_pose.matrix().data();
+  M.m[0] = data[0];
+  M.m[1] = data[1];
+  M.m[2] = data[2];
+  M.m[3] = data[3];
+
+  M.m[4] = data[4];
+  M.m[5] = data[5];
+  M.m[6] = data[6];
+  M.m[7] = data[7];
+
+  M.m[8] = data[8];
+  M.m[9] = data[9];
+  M.m[10] = data[10];
+  M.m[11] = data[11];
+
+  M.m[12] = data[12];
+  M.m[13] = data[13];
+  M.m[14] = data[14];
+  M.m[15] = data[15];
+}
 // Render the 3D viewer scene of cameras and points
 void draw_scene() {
   const FrameCamId fcid1(show_frame1, show_cam1);
@@ -670,37 +752,81 @@ void draw_scene() {
                         0.1f);
         }
       }
+      if (show_all_keyframes) {
+        render_camera(cam.second.T_w_c.matrix(), 3.0f, color_selected_left,
+                      0.1f);
+        // Draw the line
+        // Convert the Eigen::Vector3d points to GLfloat arrays
+        if (show_cov) {
+          for (const auto& cov_fcid : cam.second.covisible_weights) {
+            GLfloat start_gl[3];
+            start_gl[0] =
+                static_cast<GLfloat>(cam.second.T_w_c.translation()[0]);
+            start_gl[1] =
+                static_cast<GLfloat>(cam.second.T_w_c.translation()[1]);
+            start_gl[2] =
+                static_cast<GLfloat>(cam.second.T_w_c.translation()[2]);
+            GLfloat end_gl[3];
+            end_gl[0] = static_cast<GLfloat>(
+                cameras[cov_fcid.first].T_w_c.translation()[0]);
+            end_gl[1] = static_cast<GLfloat>(
+                cameras[cov_fcid.first].T_w_c.translation()[1]);
+            end_gl[2] = static_cast<GLfloat>(
+                cameras[cov_fcid.first].T_w_c.translation()[2]);
+
+            glBegin(GL_LINES);
+            glVertex3fv(start_gl);
+            glVertex3fv(end_gl);
+            glEnd();
+          }
+        }
+        if (show_essential) {
+          for (const auto& cov_fcid : cam.second.covisible_weights) {
+            if (cov_fcid.second > num_ess_threshold) {
+              GLfloat start_gl[3];
+              start_gl[0] =
+                  static_cast<GLfloat>(cam.second.T_w_c.translation()[0]);
+              start_gl[1] =
+                  static_cast<GLfloat>(cam.second.T_w_c.translation()[1]);
+              start_gl[2] =
+                  static_cast<GLfloat>(cam.second.T_w_c.translation()[2]);
+              GLfloat end_gl[3];
+              end_gl[0] = static_cast<GLfloat>(
+                  cameras[cov_fcid.first].T_w_c.translation()[0]);
+              end_gl[1] = static_cast<GLfloat>(
+                  cameras[cov_fcid.first].T_w_c.translation()[1]);
+              end_gl[2] = static_cast<GLfloat>(
+                  cameras[cov_fcid.first].T_w_c.translation()[2]);
+              show_spanning_tree = true;
+              glBegin(GL_LINES);
+              glVertex3fv(start_gl);
+              glVertex3fv(end_gl);
+              glEnd();
+            }
+          }
+        }
+        if (show_spanning_tree) {
+          if (cam.second.last_fcid.frame_id != -1 && cam.first.cam_id == 0) {
+            GLfloat start_gl[3];
+            start_gl[0] = static_cast<GLfloat>(
+                cameras[cam.second.last_fcid].T_w_c.translation()[0]);
+            start_gl[1] = static_cast<GLfloat>(
+                cameras[cam.second.last_fcid].T_w_c.translation()[1]);
+            start_gl[2] = static_cast<GLfloat>(
+                cameras[cam.second.last_fcid].T_w_c.translation()[2]);
+            GLfloat end_gl[3];
+            end_gl[0] = static_cast<GLfloat>(cam.second.T_w_c.translation()[0]);
+            end_gl[1] = static_cast<GLfloat>(cam.second.T_w_c.translation()[1]);
+            end_gl[2] = static_cast<GLfloat>(cam.second.T_w_c.translation()[2]);
+            glBegin(GL_LINES);
+            glVertex3fv(start_gl);
+            glVertex3fv(end_gl);
+            glEnd();
+          }
+        }
+      }
     }
     render_camera(current_pose.matrix(), 2.0f, color_camera_current, 0.1f);
-  }
-
-  if (show_all_keyframes) {
-    for (const auto& cam : cameras) {
-      render_camera(cam.second.T_w_c.matrix(), 3.0f, color_selected_left, 0.1f);
-    }
-    for (const auto& pair : covisible_pair) {
-      // Draw the line
-      // Convert the Eigen::Vector3d points to GLfloat arrays
-      GLfloat start_gl[3];
-      start_gl[0] =
-          static_cast<GLfloat>(cameras[pair.first].T_w_c.translation()[0]);
-      start_gl[1] =
-          static_cast<GLfloat>(cameras[pair.first].T_w_c.translation()[1]);
-      start_gl[2] =
-          static_cast<GLfloat>(cameras[pair.first].T_w_c.translation()[2]);
-      GLfloat end_gl[3];
-      end_gl[0] =
-          static_cast<GLfloat>(cameras[pair.second].T_w_c.translation()[0]);
-      end_gl[1] =
-          static_cast<GLfloat>(cameras[pair.second].T_w_c.translation()[1]);
-      end_gl[2] =
-          static_cast<GLfloat>(cameras[pair.second].T_w_c.translation()[2]);
-
-      glBegin(GL_LINES);
-      glVertex3fv(start_gl);
-      glVertex3fv(end_gl);
-      glEnd();
-    }
   }
 
   // render points
@@ -739,6 +865,41 @@ void draw_scene() {
     glEnd();
   }
 
+  if (!loop_edges.empty()) {
+    glColor3ubv(color_selected_right);
+    for (const auto& edge : loop_edges) {
+      std::cout << "Loop Closure found: " << std::endl;
+      std::cout << "Frame " << edge.first.frame_id << " and Frame "
+                << edge.second.frame_id << std::endl;
+
+      std::cout << "They have common landmarks: ";
+      for (const auto& kv : cameras.at(edge.first).map_points) {
+        if (cameras.at(edge.first).map_points.count(kv.first)) {
+          std::cout << kv.first << " ";
+        }
+      }
+      std::cout << std::endl;
+      GLfloat start_gl[3];
+      start_gl[0] =
+          static_cast<GLfloat>(cameras.at(edge.first).T_w_c.translation()[0]);
+      start_gl[1] =
+          static_cast<GLfloat>(cameras.at(edge.first).T_w_c.translation()[1]);
+      start_gl[2] =
+          static_cast<GLfloat>(cameras.at(edge.first).T_w_c.translation()[2]);
+      GLfloat end_gl[3];
+      end_gl[0] =
+          static_cast<GLfloat>(cameras.at(edge.second).T_w_c.translation()[0]);
+      end_gl[1] =
+          static_cast<GLfloat>(cameras.at(edge.second).T_w_c.translation()[1]);
+      end_gl[2] =
+          static_cast<GLfloat>(cameras.at(edge.second).T_w_c.translation()[2]);
+
+      glBegin(GL_LINES);
+      glVertex3fv(start_gl);
+      glVertex3fv(end_gl);
+      glEnd();
+    }
+  }
   // render points
   // if (show_old_points3d && old_landmarks.size() > 0) {
   //   glPointSize(3.0);
@@ -851,6 +1012,12 @@ bool next_step() {
     detectKeypointsAndDescriptors(imgr, kdr, num_features_per_image,
                                   rotate_features);
 
+    // cv::Mat imgl = cv::imread(images[fcidl]);
+    // cv::Mat imgr = cv::imread(images[fcidr]);
+
+    // detectKeypointsAndDescriptors(imgl, kdl, orb);
+    // detectKeypointsAndDescriptors(imgr, kdr, orb);
+
     md_stereo.T_i_j = T_0_1;
 
     Eigen::Matrix3d E;
@@ -859,6 +1026,8 @@ bool next_step() {
     matchDescriptors(kdl.corner_descriptors, kdr.corner_descriptors,
                      md_stereo.matches, feature_match_max_dist,
                      feature_match_test_next_best);
+    // matchDescriptors(kdl.corner_descriptors, kdr.corner_descriptors, matcher,
+    //                  md_stereo.matches);
 
     findInliersEssential(kdl, kdr, calib_cam.intrinsics[0],
                          calib_cam.intrinsics[1], E, 1e-3, md_stereo);
@@ -886,16 +1055,45 @@ bool next_step() {
 
     add_new_landmarks(fcidl, fcidr, kdl, kdr, calib_cam, md_stereo, md,
                       landmarks, next_landmark_id);
+    Camera current_cam_left;
+    Camera current_cam_right;
+    construct_visibility_graph(fcidl, cameras, landmarks, current_cam_left,
+                               graph, num_cov_threshold);
+    // construct_visibility_graph(fcidr, cameras, landmarks, current_cam_right,
+    //                            graph, num_cov_threshold);
+    current_cam_left.T_w_c = current_pose;
+    current_cam_left.active = true;
+    current_cam_left.last_fcid = last_kf_fcid;
+    cv::Mat imgl_cv = cv::imread(images[fcidl]);
+    compute_bow_vector(imgl_cv, orb, num_features_per_image, orb_voc,
+                       current_cam_left.bow_vector,
+                       current_cam_left.feature_vector);
 
-    construct_visibility_graph(fcidl, cameras, landmarks, covisible_pair,
-                               num_cov_threshold);
-    construct_visibility_graph(fcidr, cameras, landmarks, covisible_pair,
-                               num_cov_threshold);
+    // bow_voc->transform(feature_corners[fcidl].corner_descriptors,
+    //                    current_cam_left.bow_vector);
 
-    cameras[fcidl].T_w_c = current_pose;
-    cameras[fcidl].active = true;
-    cameras[fcidr].T_w_c = current_pose * T_0_1;
-    cameras[fcidr].active = true;
+    // current_cam_left.bow_vector
+
+    current_cam_right.T_w_c = current_pose * T_0_1;
+    current_cam_right.active = true;
+
+    loop_detected = detect_loop_closure(
+        fcidl, current_cam_left, cameras, orb_db, orb_voc, graph,
+        consistent_groups, enough_consistent_candidates, num_cov_threshold * 2,
+        num_consistency);
+    if (loop_detected) {
+      for (int i = 0; i < enough_consistent_candidates.size(); i++) {
+        loop_edges.push_back(
+            std::make_pair(fcidl, enough_consistent_candidates[i]));
+      }
+    }
+    cameras[fcidl] = current_cam_left;
+    cameras[fcidr] = current_cam_right;
+
+    // cameras[fcidl].T_w_c = current_pose;
+    // cameras[fcidl].active = true;
+    // cameras[fcidr].T_w_c = current_pose * T_0_1;
+    // cameras[fcidr].active = true;
 
     remove_old_keyframes(fcidl, max_num_kfs, cameras, landmarks, kf_frames);
 
@@ -916,7 +1114,7 @@ bool next_step() {
     optimize();
 
     current_pose = cameras[fcidl].T_w_c;
-
+    last_kf_fcid = fcidl;
     // update image views
     change_display_to_image(fcidl);
     change_display_to_image(fcidr);
@@ -944,7 +1142,9 @@ bool next_step() {
 
     detectKeypointsAndDescriptors(imgl, kdl, num_features_per_image,
                                   rotate_features);
+    // cv::Mat imgl = cv::imread(images[fcidl]);
 
+    // detectKeypointsAndDescriptors(imgl, kdl, orb);
     feature_corners[fcidl] = kdl;
 
     LandmarkMatchData md;

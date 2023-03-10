@@ -117,6 +117,11 @@ void find_matches_landmarks(
               (feature_corners.at(fcid).corner_descriptors[f_id] ^
                kdl.corner_descriptors[current_keypoint_idx])
                   .count();
+          // int feature_match_dist =
+          //     cv::norm(feature_corners.at(fcid).corner_descriptors.row(f_id)
+          //     ^
+          //                  kdl.corner_descriptors.row(current_keypoint_idx),
+          //              cv::NORM_HAMMING);
           if (feature_match_dist < minimal_dist) {
             minimal_dist = feature_match_dist;
           }
@@ -161,6 +166,8 @@ void find_matches_landmarks(
   }
 }
 
+// void compute_predicted_camera_
+
 void localize_camera(const Sophus::SE3d& current_pose,
                      const std::shared_ptr<AbstractCamera<double>>& cam,
                      const KeypointsData& kdl, const Landmarks& landmarks,
@@ -171,7 +178,7 @@ void localize_camera(const Sophus::SE3d& current_pose,
   // default to previous pose if not enough inliers
   md.T_w_c = current_pose;
 
-  if (md.matches.size() < 4) {
+  if (md.matches.size() < 10) {
     return;
   }
 

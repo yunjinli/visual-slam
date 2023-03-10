@@ -32,13 +32,12 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #pragma once
 
-#include <fstream>
-
 #include <tbb/concurrent_unordered_map.h>
 #include <tbb/concurrent_vector.h>
-
 #include <visnav/common_types.h>
 #include <visnav/serialization.h>
+
+#include <fstream>
 
 namespace visnav {
 
@@ -151,7 +150,97 @@ class BowDatabase {
       results.push_back(image_score_vec[i]);
     }
   }
+  inline void query(const BowVector& bow_vector, double min_score,
+                    BowQueryResult& results) const {
+    // Find closest matches to the bow_vector that is above min_score in the
+    // inverted index.
 
+    /* Short Reminder
+     * BowVector = std::vector<std::pair<WordId, WordValue>>
+     *
+     * BowDBInverseIndexConcurrent = tbb::concurrent_unordered_map<WordId,
+     * tbb::concurrent_vector<std::pair<FrameCamId, WordValue>>>
+     *
+     * BowQueryResult = std::vector<std::pair<FrameCamId, double>>
+     */
+
+    /*
+     * Use the formula given by the nister2006cvpr_vocab-tree paper
+     * |q-d|=2+sigma_(i|qi !=0, di != 0){|qi - di| - |qi| - di}
+     * Accodding to the formula, we only do some action when a specific wordId
+     * could be found in both the query and the database
+     */
+    // My thought: Iterate through the inverted_index, check if the wordId can
+    // be also found in query, append the score with respected to the fcid
+    auto find_wid_in_query = [&v = bow_vector](WordId wid) {
+      //      std::pair<WordId, WordValue>* ptr = nullptr;
+      int found_idx = -1;
+      int idx = 0;
+      for (const auto& kv : v) {
+        if (kv.first == wid) {
+          found_idx = idx;
+          break;
+        } else {
+          // Do nothing
+        }
+        idx++;
+      }
+      return found_idx;
+    };
+
+    std::unordered_map<FrameCamId, double> image_score_map;
+
+    auto has_key = [&m = image_score_map](FrameCamId key) {
+      for (const auto& kv : m) {
+        if (kv.first.frame_id == key.frame_id &&
+            kv.first.cam_id == key.cam_id) {
+          return true;
+        } else {
+        }
+      }
+      return false;
+    };
+
+    for (const auto& kv : inverted_index) {
+      int index_found_in_query = find_wid_in_query(kv.first);
+      if (index_found_in_query != -1) {
+        // Iterate through the fcid in this wordId in the inverted_index
+        for (const auto& fcid : kv.second) {
+          // fcid.first -> FrameCamId
+          // fcid.second -> Weight
+          /*
+           * Check if our map already have specific FrameCamId
+           */
+          if (has_key(fcid.first)) {  // we add value to the existing value
+            image_score_map.at(fcid.first) +=
+                std::abs(bow_vector[index_found_in_query].second -
+                         fcid.second) -
+                std::abs(bow_vector[index_found_in_query].second) -
+                std::abs(fcid.second);
+          } else {  // we push back new fcid, score pair
+            image_score_map.emplace(std::make_pair(
+                fcid.first,
+                std::abs(bow_vector[index_found_in_query].second -
+                         fcid.second) -
+                    std::abs(bow_vector[index_found_in_query].second) -
+                    std::abs(fcid.second)));
+          }
+        }
+      } else {
+        // Do nothing
+      }
+    }
+
+    for (auto& m : image_score_map) {
+      m.second += 2;
+    }
+
+    for (auto& kv : image_score_map) {
+      if (kv.second > min_score) {
+        results.push_back(kv);
+      }
+    }
+  }
   void clear() { inverted_index.clear(); }
 
   void save(const std::string& out_path) {

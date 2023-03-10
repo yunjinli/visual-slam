@@ -51,65 +51,68 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 namespace visnav {
 
 // save map with all features and matches
-void save_map_file(const std::string& map_path, const Corners& feature_corners,
-                   const Matches& feature_matches,
-                   const FeatureTracks& feature_tracks,
-                   const FeatureTracks& outlier_tracks, const Cameras& cameras,
-                   const Landmarks& landmarks) {
-  {
-    std::ofstream os(map_path, std::ios::binary);
+// void save_map_file(const std::string& map_path, const Corners&
+// feature_corners,
+//                    const Matches& feature_matches,
+//                    const FeatureTracks& feature_tracks,
+//                    const FeatureTracks& outlier_tracks, const Cameras&
+//                    cameras, const Landmarks& landmarks) {
+//   {
+//     std::ofstream os(map_path, std::ios::binary);
 
-    if (os.is_open()) {
-      cereal::BinaryOutputArchive archive(os);
-      archive(feature_corners);
-      archive(feature_matches);
-      archive(feature_tracks);
-      archive(outlier_tracks);
-      archive(cameras);
-      archive(landmarks);
+//     if (os.is_open()) {
+//       cereal::BinaryOutputArchive archive(os);
+//       archive(feature_corners);
+//       archive(feature_matches);
+//       archive(feature_tracks);
+//       archive(outlier_tracks);
+//       archive(cameras);
+//       archive(landmarks);
 
-      size_t num_obs = 0;
-      for (const auto& kv : landmarks) {
-        num_obs += kv.second.obs.size();
-      }
-      std::cout << "Saved map as " << map_path << " (" << cameras.size()
-                << " cameras, " << landmarks.size() << " landmarks, " << num_obs
-                << " observations)" << std::endl;
-    } else {
-      std::cout << "Failed to save map as " << map_path << std::endl;
-    }
-  }
-}
+//       size_t num_obs = 0;
+//       for (const auto& kv : landmarks) {
+//         num_obs += kv.second.obs.size();
+//       }
+//       std::cout << "Saved map as " << map_path << " (" << cameras.size()
+//                 << " cameras, " << landmarks.size() << " landmarks, " <<
+//                 num_obs
+//                 << " observations)" << std::endl;
+//     } else {
+//       std::cout << "Failed to save map as " << map_path << std::endl;
+//     }
+//   }
+// }
 
 // load map with all features and matches
-void load_map_file(const std::string& map_path, Corners& feature_corners,
-                   Matches& feature_matches, FeatureTracks& feature_tracks,
-                   FeatureTracks& outlier_tracks, Cameras& cameras,
-                   Landmarks& landmarks) {
-  {
-    std::ifstream is(map_path, std::ios::binary);
+// void load_map_file(const std::string& map_path, Corners& feature_corners,
+//                    Matches& feature_matches, FeatureTracks& feature_tracks,
+//                    FeatureTracks& outlier_tracks, Cameras& cameras,
+//                    Landmarks& landmarks) {
+//   {
+//     std::ifstream is(map_path, std::ios::binary);
 
-    if (is.is_open()) {
-      cereal::BinaryInputArchive archive(is);
-      archive(feature_corners);
-      archive(feature_matches);
-      archive(feature_tracks);
-      archive(outlier_tracks);
-      archive(cameras);
-      archive(landmarks);
+//     if (is.is_open()) {
+//       cereal::BinaryInputArchive archive(is);
+//       archive(feature_corners);
+//       archive(feature_matches);
+//       archive(feature_tracks);
+//       archive(outlier_tracks);
+//       archive(cameras);
+//       archive(landmarks);
 
-      size_t num_obs = 0;
-      for (const auto& kv : landmarks) {
-        num_obs += kv.second.obs.size();
-      }
-      std::cout << "Loaded map from " << map_path << " (" << cameras.size()
-                << " cameras, " << landmarks.size() << " landmarks, " << num_obs
-                << " observations)" << std::endl;
-    } else {
-      std::cout << "Failed to load map from " << map_path << std::endl;
-    }
-  }
-}
+//       size_t num_obs = 0;
+//       for (const auto& kv : landmarks) {
+//         num_obs += kv.second.obs.size();
+//       }
+//       std::cout << "Loaded map from " << map_path << " (" << cameras.size()
+//                 << " cameras, " << landmarks.size() << " landmarks, " <<
+//                 num_obs
+//                 << " observations)" << std::endl;
+//     } else {
+//       std::cout << "Failed to load map from " << map_path << std::endl;
+//     }
+//   }
+// }
 
 // Create new landmarks from shared feature tracks if they don't already exist.
 // The two cameras must be in the map already.
