@@ -301,6 +301,8 @@ void add_new_landmarks(const FrameCamId fcidl, const FrameCamId fcidr,
           md.T_w_c * opengv::triangulation::triangulate(adapter, 0);
       Landmark l;
       l.p = point;
+      l.p_c = md.T_w_c.inverse() * point;
+      l.from_fcid = fcidl;
       l.active = true;
       l.obs.emplace(std::make_pair(fcidl, f_idl));
       l.obs.emplace(std::make_pair(fcidr, f_idr));
