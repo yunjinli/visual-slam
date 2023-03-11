@@ -1,9 +1,38 @@
-#pragma once
+/*
+ * Created on Fri Mar 10 2023
+ *
+ * The MIT License (MIT)
+ * Copyright (c) 2023 Yun-Jin Li (Jim)
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
 
+#pragma once
+#include <ceres/ceres.h>
 #include <visnav/ORBVocabulary.h>
 #include <visnav/bow_db.h>
 #include <visnav/common_types.h>
 #include <visnav/keypoints.h>
+#include <visnav/reprojection.h>
+
+#include <thread>
+#include <visnav/local_parameterization_se3.hpp>
 namespace visnav {
 
 /**
@@ -55,6 +84,9 @@ void construct_visibility_graph(const FrameCamId& new_fcid,
       if (fcid_count.second >= threshold) {
         new_camera.covisible_weights.emplace(
             std::make_pair(fcid_count.first, fcid_count.second));
+        new_camera.covisible_rel_poses.emplace(std::make_pair(
+            fcid_count.first,
+            new_camera.T_w_c.inverse() * cameras.at(fcid_count.first).T_w_c));
         new_edges.insert(fcid_count.first);
         graph[fcid_count.first].insert(new_fcid);
       }
@@ -63,45 +95,6 @@ void construct_visibility_graph(const FrameCamId& new_fcid,
   graph[new_fcid] = new_edges;
 }
 
-/**
- * Compute the similarity score for bag-of-word vector
- * @param v1 The bag-of-word vector
- * @param v2 The bag-of-word vector
- * @return Return the score of similarity score
- */
-// double compute_bow_score(const BowVector& v1, const BowVector& v2) {
-//   double score = 0;
-//   auto find_wid_in_query = [&v = v1](WordId wid) {
-//     int found_idx = -1;
-//     int idx = 0;
-//     for (const auto& kv : v) {
-//       if (kv.first == wid) {
-//         found_idx = idx;
-//         break;
-//       } else {
-//         // Do nothing
-//       }
-//       idx++;
-//     }
-//     return found_idx;
-//   };
-//   // Use the formula given by the nister2006cvpr_vocab-tree paper:
-//   // |q-d|=2+sigma_(i|qi !=0, di != 0){|qi - di| - |qi| - di}
-//   for (const auto& kv : v2) {
-//     // key: WordId
-//     // value: Weight
-//     int index_found_in_query = find_wid_in_query(kv.first);
-//     if (index_found_in_query != -1) {
-//       score += std::abs(v1[index_found_in_query].second - kv.second) -
-//                std::abs(v1[index_found_in_query].second) -
-//                std::abs(kv.second);
-//     } else {
-//       // nop
-//     }
-//   }
-//   score = -score / 2.0;  // let the score be in range [0, 1]
-//   return score;
-// }
 /**
  * Compute the minumum bag-of-word score for the newly added keyframe with all
  * of its covisible neighbors that have weight above `threshold`
@@ -385,4 +378,202 @@ bool detect_loop_closure(const FrameCamId& new_kf_fcid, const Camera& new_kf,
   return false;
 }
 
+void loop_align(const FrameCamId& cur_kf_fcid, Camera cur_kf,
+                const FrameCamId& loop_candidate_fcid,
+                const Sophus::SE3d& T_0_1, const Sophus::SE3d& sim3,
+                Cameras& keyframes, Landmarks& landmarks) {
+  // std::set<FrameCamId> neighbor_frames = graph.at(loop_candidate_fcid);
+  // Sophus::SE3d transformation =
+  //     keyframes.at(loop_candidate_fcid).T_w_c.inverse() * cur_kf.T_w_c *
+  //     sim3;
+  // keyframes.at(loop_candidate_fcid).T_w_c =
+  //     keyframes.at(loop_candidate_fcid).T_w_c * transformation;
+  // for (auto it = neighbor_frames.begin(); it != neighbor_frames.end(); it++)
+  // {
+  //   keyframes.at(*it).T_w_c = keyframes.at(*it).T_w_c * transformation;
+  //   keyframes.at(FrameCamId(it->frame_id, 1)).T_w_c =
+  //       keyframes.at(FrameCamId(it->frame_id, 1)).T_w_c * transformation;
+  // }
+  // std::set<FrameCamId> neighbor_frames = graph.at(cur_kf_fcid);
+  const std::map<FrameCamId, Sophus::SE3d>& neighbor_frames =
+      cur_kf.covisible_rel_poses;
+  Sophus::SE3d transformation =
+      cur_kf.T_w_c.inverse() * keyframes.at(loop_candidate_fcid).T_w_c * sim3;
+  cur_kf.T_w_c = cur_kf.T_w_c * transformation;
+  for (const auto& kv : neighbor_frames) {
+    keyframes.at(kv.first).T_w_c = cur_kf.T_w_c * kv.second;
+    // keyframes.at(*it).T_w_c = keyframes.at(*it).T_w_c * transformation;
+    // keyframes.at(FrameCamId(it->frame_id, 1)).T_w_c =
+    //     keyframes.at(FrameCamId(it->frame_id, 1)).T_w_c * transformation;
+    keyframes.at(FrameCamId(kv.first.frame_id, 1)).T_w_c =
+        keyframes.at(kv.first).T_w_c * T_0_1;
+  }
+}
+
+void landmark_fusion(const FrameCamId& cur_kf_fcid, Camera cur_kf,
+                     const FrameCamId& loop_candidate_fcid,
+                     const Sophus::SE3d& sim3, Cameras& keyframes,
+                     Landmarks& landmarks) {}
+
+void pose_graph_optimization(const FrameCamId& cur_kf_fcid, Camera& cur_kf,
+                             const FrameCamId& loop_candidate_fcid,
+                             const Sophus::SE3d& sim3, Cameras& keyframes,
+                             int essential_threshold) {
+  ceres::Problem problem;
+
+  for (auto& kv : keyframes) {
+    problem.AddParameterBlock(kv.second.T_w_c.data(),
+                              Sophus::SE3d::num_parameters,
+                              new Sophus::test::LocalParameterizationSE3);
+  }
+  problem.AddParameterBlock(cur_kf.T_w_c.data(), Sophus::SE3d::num_parameters,
+                            new Sophus::test::LocalParameterizationSE3);
+  problem.SetParameterBlockConstant(cur_kf.T_w_c.data());
+
+  FrameCamId fcid_now = cur_kf_fcid;
+  if (cur_kf.covisible_weights.count(cur_kf.last_fcid)) {
+    if (cur_kf.covisible_weights.at(cur_kf.last_fcid) > essential_threshold) {
+      // nvm since it would be added in the loop below
+    } else {  // We also optimize the edge on spanning tree
+      PoseGraphRelativePoseCostFunctor* c =
+          new PoseGraphRelativePoseCostFunctor(
+              (cur_kf.T_w_c.inverse() * keyframes.at(cur_kf.last_fcid).T_w_c)
+                  .log());
+      ceres::CostFunction* cost_function =
+          new ceres::AutoDiffCostFunction<PoseGraphRelativePoseCostFunctor, 6,
+                                          Sophus::SE3d::num_parameters,
+                                          Sophus::SE3d::num_parameters>(c);
+      problem.AddResidualBlock(cost_function, new ceres::HuberLoss(1.0),
+                               cur_kf.T_w_c.data(),
+                               keyframes.at(cur_kf.last_fcid).T_w_c.data());
+    }
+  } else  // We also optimize the edge on spanning tree
+  {
+    PoseGraphRelativePoseCostFunctor* c = new PoseGraphRelativePoseCostFunctor(
+        (cur_kf.T_w_c.inverse() * keyframes.at(cur_kf.last_fcid).T_w_c).log());
+    ceres::CostFunction* cost_function =
+        new ceres::AutoDiffCostFunction<PoseGraphRelativePoseCostFunctor, 6,
+                                        Sophus::SE3d::num_parameters,
+                                        Sophus::SE3d::num_parameters>(c);
+    problem.AddResidualBlock(cost_function, new ceres::HuberLoss(1.0),
+                             cur_kf.T_w_c.data(),
+                             keyframes.at(cur_kf.last_fcid).T_w_c.data());
+  }
+
+  for (const auto& kv : cur_kf.covisible_weights) {
+    if (kv.second > essential_threshold) {
+      PoseGraphRelativePoseCostFunctor* c =
+          new PoseGraphRelativePoseCostFunctor(
+              cur_kf.covisible_rel_poses.at(kv.first).log());
+      ceres::CostFunction* cost_function =
+          new ceres::AutoDiffCostFunction<PoseGraphRelativePoseCostFunctor, 6,
+                                          Sophus::SE3d::num_parameters,
+                                          Sophus::SE3d::num_parameters>(c);
+      problem.AddResidualBlock(cost_function, new ceres::HuberLoss(1.0),
+                               cur_kf.T_w_c.data(),
+                               keyframes.at(kv.first).T_w_c.data());
+    }
+  }
+  // Add Sim(3) Constraint
+  PoseGraphRelativePoseCostFunctor* c =
+      new PoseGraphRelativePoseCostFunctor(sim3.inverse().log());
+  ceres::CostFunction* cost_function =
+      new ceres::AutoDiffCostFunction<PoseGraphRelativePoseCostFunctor, 6,
+                                      Sophus::SE3d::num_parameters,
+                                      Sophus::SE3d::num_parameters>(c);
+  problem.AddResidualBlock(cost_function, new ceres::HuberLoss(1.0),
+                           cur_kf.T_w_c.data(),
+                           keyframes.at(loop_candidate_fcid).T_w_c.data());
+  fcid_now = cur_kf.last_fcid;
+
+  while (fcid_now.frame_id != -1) {
+    if (keyframes.at(fcid_now).covisible_weights.count(
+            keyframes.at(fcid_now).last_fcid)) {
+      if (keyframes.at(fcid_now).covisible_weights.at(
+              keyframes.at(fcid_now).last_fcid) > essential_threshold) {
+        // nvm since it would be added in the loop below
+      } else {  // We also optimize the edge on spanning tree
+        if (keyframes.at(fcid_now).last_fcid.frame_id != -1) {
+          PoseGraphRelativePoseCostFunctor* c =
+              new PoseGraphRelativePoseCostFunctor(
+                  (keyframes.at(fcid_now).T_w_c.inverse() *
+                   keyframes.at(keyframes.at(fcid_now).last_fcid).T_w_c)
+                      .log());
+          ceres::CostFunction* cost_function =
+              new ceres::AutoDiffCostFunction<PoseGraphRelativePoseCostFunctor,
+                                              6, Sophus::SE3d::num_parameters,
+                                              Sophus::SE3d::num_parameters>(c);
+          problem.AddResidualBlock(
+              cost_function, new ceres::HuberLoss(1.0),
+              keyframes.at(fcid_now).T_w_c.data(),
+              keyframes.at(keyframes.at(fcid_now).last_fcid).T_w_c.data());
+        }
+      }
+    } else {  // We also optimize the edge on spanning tree
+      if (keyframes.at(fcid_now).last_fcid.frame_id != -1) {
+        PoseGraphRelativePoseCostFunctor* c =
+            new PoseGraphRelativePoseCostFunctor(
+                (keyframes.at(fcid_now).T_w_c.inverse() *
+                 keyframes.at(keyframes.at(fcid_now).last_fcid).T_w_c)
+                    .log());
+        ceres::CostFunction* cost_function =
+            new ceres::AutoDiffCostFunction<PoseGraphRelativePoseCostFunctor, 6,
+                                            Sophus::SE3d::num_parameters,
+                                            Sophus::SE3d::num_parameters>(c);
+        problem.AddResidualBlock(
+            cost_function, new ceres::HuberLoss(1.0),
+            keyframes.at(fcid_now).T_w_c.data(),
+            keyframes.at(keyframes.at(fcid_now).last_fcid).T_w_c.data());
+      }
+    }
+
+    for (const auto& kv : keyframes.at(fcid_now).covisible_weights) {
+      if (kv.second > essential_threshold) {
+        PoseGraphRelativePoseCostFunctor* c =
+            new PoseGraphRelativePoseCostFunctor(
+                keyframes.at(fcid_now).covisible_rel_poses.at(kv.first).log());
+        ceres::CostFunction* cost_function =
+            new ceres::AutoDiffCostFunction<PoseGraphRelativePoseCostFunctor, 6,
+                                            Sophus::SE3d::num_parameters,
+                                            Sophus::SE3d::num_parameters>(c);
+        problem.AddResidualBlock(cost_function, new ceres::HuberLoss(1.0),
+                                 keyframes.at(fcid_now).T_w_c.data(),
+                                 keyframes.at(kv.first).T_w_c.data());
+      }
+    }
+    fcid_now = keyframes.at(fcid_now).last_fcid;
+  }
+
+  // Solve
+  ceres::Solver::Options ceres_options;
+  ceres_options.max_num_iterations = 20;
+  ceres_options.linear_solver_type = ceres::SPARSE_SCHUR;
+  ceres_options.num_threads = std::thread::hardware_concurrency();
+  ceres::Solver::Summary summary;
+  Solve(ceres_options, &problem, &summary);
+  std::cout << summary.BriefReport() << std::endl;
+}  // namespace visnav
+
+void update_stereo_pair(const FrameCamId& cur_kf_fcid, Camera cur_kf,
+                        const Sophus::SE3d T_0_1, Cameras& keyframes) {
+  for (auto& kv : keyframes) {
+    if (kv.first.cam_id == 1) {
+      kv.second.T_w_c =
+          keyframes.at(FrameCamId(kv.first.frame_id, 0)).T_w_c * T_0_1;
+    }
+  }
+}
+void loop_closure(const FrameCamId& cur_kf_fcid, Camera cur_kf,
+                  const FrameCamId& loop_candidate_fcid,
+                  const Sophus::SE3d T_0_1, const Sophus::SE3d& sim3,
+                  Cameras& keyframes, Landmarks& landmarks,
+                  int essential_threshold) {
+  loop_align(cur_kf_fcid, cur_kf, loop_candidate_fcid, T_0_1, sim3, keyframes,
+             landmarks);
+  // landmark fustion
+  pose_graph_optimization(cur_kf_fcid, cur_kf, loop_candidate_fcid, sim3,
+                          keyframes, essential_threshold);
+  // update stereo pair
+  update_stereo_pair(cur_kf_fcid, cur_kf, T_0_1, keyframes);
+}
 }  // namespace visnav

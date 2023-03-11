@@ -2,7 +2,7 @@
 
 #include <fstream>
 
-namespace slam {
+namespace visnav {
 class EurocDataset : public Dataset {
   size_t num_cams;
 
@@ -49,15 +49,15 @@ class EurocIO : public DatasetIoInterface {
     data->num_cams = 2;
     data->path = path;
 
-    read_image_timestamps(path + "/mav0/cam0/");
+    read_image_timestamps(path + "/cam0/");
 
-    std::ifstream gt_states(path + "/mav0/state_groundtruth_estimate0/data.csv",
+    std::ifstream gt_states(path + "/state_groundtruth_estimate0/data.csv",
                             std::ios::binary);
-    std::ifstream gt_poses(path + "/mav0/gt/data.csv", std::ios::binary);
+    std::ifstream gt_poses(path + "/gt/data.csv", std::ios::binary);
     if (gt_states.is_open()) {
-      read_gt_data_state(path + "/mav0/state_groundtruth_estimate0/");
+      read_gt_data_state(path + "/state_groundtruth_estimate0/");
     } else if (gt_poses.is_open()) {
-      read_gt_data_pose(path + "/mav0/gt/");
+      read_gt_data_pose(path + "/gt/");
     }
   }
 
@@ -135,4 +135,4 @@ class EurocIO : public DatasetIoInterface {
 
   std::shared_ptr<EurocDataset> data;
 };
-}  // namespace slam
+}  // namespace visnav

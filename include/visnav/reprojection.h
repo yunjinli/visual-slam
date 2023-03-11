@@ -104,4 +104,24 @@ struct BundleAdjustmentReprojectionCostFunctor {
   std::string cam_model;
 };
 
+struct PoseGraphRelativePoseCostFunctor {
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+  PoseGraphRelativePoseCostFunctor(
+      const Eigen::Matrix<double, 6, 1>& upsilon_omega)
+      : upsilon_omega(upsilon_omega) {}
+
+  template <class T>
+  bool operator()(T const* const sT_w_c, T const* const sT_w_n,
+                  T* sResiduals) const {
+    // map inputs
+    Eigen::Map<Sophus::SE3<T> const> const T_w_c(sT_w_c);
+    Eigen::Map<Sophus::SE3<T> const> const T_w_n(sT_w_n);
+    Eigen::Map<Eigen::Matrix<T, 6, 1>> residuals(sResiduals);
+
+    residuals = (T_w_c.inverse() * T_w_n).log() - upsilon_omega;
+    return true;
+  }
+
+  Eigen::Matrix<double, 6, 1> upsilon_omega;
+};
 }  // namespace visnav

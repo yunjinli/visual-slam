@@ -129,7 +129,7 @@ message(STATUS "Found Opencv headers in: ${OPENCV_INCLUDE_DIR}")
 # target_link_libraries(odometry Ceres::ceres pangolin TBB::tbb opengv ${OpenCV_LIBS})
 # add_executable(feed_image_opencv src/feed_image_opencv.cpp)
 # target_link_libraries(feed_image_opencv ${OpenCV_LIBS})
-# add_library(dataset_io src/io/dataset_io.cpp)
+add_library(dataset_io src/io/dataset_io.cpp)
 
 # set(DBOW2_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/build-DBoW2/")
 # find_package(DBoW2 REQUIRED CONFIG HINTS ${DBOW2_ROOT} NO_DEFAULT_PATH)
@@ -139,7 +139,7 @@ include_directories(thirdparty/DBoW2_ORBSLAM)
 
 
 add_executable(slam src/slam.cpp)
-target_link_libraries(slam Ceres::ceres pangolin TBB::tbb opengv ${OpenCV_LIBS} ${PROJECT_SOURCE_DIR}/thirdparty/DBoW2_ORBSLAM/lib/libDBoW2.so) 
+target_link_libraries(slam Ceres::ceres pangolin TBB::tbb opengv ${OpenCV_LIBS} ${PROJECT_SOURCE_DIR}/thirdparty/DBoW2_ORBSLAM/lib/libDBoW2.so dataset_io) 
 enable_testing()
 add_subdirectory(test)
 add_subdirectory(thirdparty/DBoW2_ORBSLAM)

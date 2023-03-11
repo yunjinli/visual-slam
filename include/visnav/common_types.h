@@ -207,12 +207,14 @@ struct Camera {
   bool active;
   // std::vector<FrameCamId> covisible_camera_fcids;
   std::map<FrameCamId, int> covisible_weights;
+  std::map<FrameCamId, Sophus::SE3d> covisible_rel_poses;
   FrameCamId last_fcid;
   // BowVector bow_vector;
   DBoW2::BowVector bow_vector;
   DBoW2::FeatureVector feature_vector;
   // Associated landmarks with keypoins
   std::map<TrackId, FeatureId> map_points;
+  std::string img_path;
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 };
 

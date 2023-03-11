@@ -135,7 +135,8 @@ void detectKeypoints(const pangolin::ManagedImage<uint8_t>& img_raw,
   cv::Mat image(img_raw.h, img_raw.w, CV_8U, img_raw.ptr);
 
   std::vector<cv::Point2f> points;
-  goodFeaturesToTrack(image, points, num_features, 0.01, 8);
+  goodFeaturesToTrack(image, points, num_features, 0.01, 8, cv::noArray(), 3,
+                      false);
 
   kd.corners.clear();
   kd.corner_angles.clear();
@@ -240,7 +241,7 @@ void detectKeypointsAndDescriptors(
 // }
 
 void compute_bow_vector(const cv::Mat& img_raw, cv::Ptr<cv::ORB> orb,
-                        int num_features, ORBVocabulary* voc,
+                        int num_features, const ORBVocabulary* voc,
                         DBoW2::BowVector& bow_vector,
                         DBoW2::FeatureVector& feature_vector) {
   std::vector<cv::KeyPoint> keypoints;

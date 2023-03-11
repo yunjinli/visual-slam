@@ -37,7 +37,10 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <pangolin/pangolin.h>
 #include <tbb/concurrent_unordered_map.h>
 #include <visnav/ORBVocabulary.h>
+#include <visnav/sim3.h>
+#include <visnav/tracking.h>
 // #include <visnav/bow_voc.h>
+#include <io/dataset_io_euroc.h>
 #include <visnav/calibration.h>
 #include <visnav/common_types.h>
 #include <visnav/gui_helper.h>
@@ -73,7 +76,16 @@ void load_data(const std::string& path, const std::string& calib_path);
 bool next_step();
 void optimize();
 void compute_projections();
-
+void print_sim3();
+double alignSVD(
+    const std::vector<int64_t>& filter_t_ns,
+    const std::vector<Eigen::Vector3d,
+                      Eigen::aligned_allocator<Eigen::Vector3d>>& filter_t_w_i,
+    const std::vector<int64_t>& gt_t_ns,
+    std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d>>&
+        gt_t_w_i);
+double align_svd();
+// void correct_loop();
 ///////////////////////////////////////////////////////////////////////////////
 /// Constants
 ///////////////////////////////////////////////////////////////////////////////
@@ -91,6 +103,7 @@ cv::Ptr<cv::ORB> orb;
 
 int current_frame = 0;
 Sophus::SE3d current_pose;
+Sophus::SE3d last_pose;
 bool take_keyframe = true;
 TrackId next_landmark_id = 0;
 
@@ -160,9 +173,25 @@ ConsistentGroups consistent_groups;
 std::vector<FrameCamId> enough_consistent_candidates;
 std::vector<std::pair<FrameCamId, FrameCamId>> loop_edges;
 bool loop_detected = false;
+Sophus::SE3d sim3;
+Sophus::SE3d rel_trans;
 
+/// For relocalization
+/// This is not really a velocity but rather
+/// a constraint that tells us if the localization
+/// is correct
+Sophus::SE3d vel;
+bool tracking_successful = false;
 // For visualization
 pangolin::OpenGlMatrix M;
+// Ground-true for comparing
+std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d>>
+    gt_t_w_i;
+std::vector<Timestamp> gt_t_ns;
+std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d>>
+    est_t_w_i;
+std::vector<Timestamp> est_t_ns;
+std::string dataset_type = "euroc";
 ///////////////////////////////////////////////////////////////////////////////
 /// GUI parameters
 ///////////////////////////////////////////////////////////////////////////////
@@ -175,7 +204,8 @@ pangolin::Var<bool> ui_show_hidden("ui.show_extra_options", false, true);
 
 //////////////////////////////////////////////
 /// Image display options
-
+pangolin::Var<std::string> frame1_id("ui.check_frame1", "0");
+pangolin::Var<std::string> frame2_id("ui.check_frame2", "0");
 pangolin::Var<int> show_frame1("ui.show_frame1", 0, 0, 1500);
 pangolin::Var<int> show_cam1("ui.show_cam1", 0, 0, NUM_CAMS - 1);
 pangolin::Var<int> show_frame2("ui.show_frame2", 0, 0, 1500);
@@ -199,7 +229,8 @@ pangolin::Var<bool> show_vio_pt("hidden.show_vio_pt", false, true);
 //////////////////////////////////////////////
 /// Feature extraction and matching options
 
-pangolin::Var<int> num_features_per_image("hidden.num_features", 500, 10, 5000);
+pangolin::Var<int> num_features_per_image("hidden.num_features", 1500, 10,
+                                          5000);
 pangolin::Var<bool> rotate_features("hidden.rotate_features", true, true);
 pangolin::Var<int> feature_match_max_dist("hidden.match_max_dist", 70, 1, 255);
 pangolin::Var<double> feature_match_test_next_best("hidden.match_next_best",
@@ -214,17 +245,24 @@ pangolin::Var<int> max_num_kfs("hidden.max_num_kfs", 10, 5, 20);
 
 pangolin::Var<double> cam_z_threshold("hidden.cam_z_threshold", 0.1, 1.0, 0.0);
 
+pangolin::Var<double> motion_threshold("hidden.motion_threshold", 0.5, 0.1,
+                                       2.0);
+
 pangolin::Var<bool> show_all_keyframes("hidden.show_all_keyframes", true, true);
 // pangolin::Var<double> new_kf_observed_features_threshold(
 //     "hidden.new_kf_observed_features_threshold", 0.75, 0.1, 0.95);
 // pangolin::Var<double> covisible_threshold("hidden.covisible_threshold", 0.1,
 //                                           0.0, 1.0);
-pangolin::Var<int> num_cov_threshold("hidden.num_cov_threshold", 15, 1, 100);
+pangolin::Var<int> num_cov_threshold("hidden.num_cov_threshold", 10, 5, 100);
 pangolin::Var<bool> show_cov("hidden.show_cov", true, true);
 pangolin::Var<int> num_ess_threshold("hidden.num_ess_threshold", 30, 1, 100);
 pangolin::Var<bool> show_essential("hidden.show_essential", false, true);
 pangolin::Var<bool> show_spanning_tree("hidden.show_spanning_tree", true, true);
 pangolin::Var<int> num_consistency("hidden.num_consistency", 3, 1, 15);
+pangolin::Var<bool> show_loop_closing_edge("hidden.show_loop", true, true);
+pangolin::Var<int> loop_closing_time_threshold("hidden.loop_closing_time", 500,
+                                               100, 3000);
+pangolin::Var<bool> use_sim3("hidden.use_sim3", true, true);
 //////////////////////////////////////////////
 /// Adding cameras and landmarks options
 
@@ -251,6 +289,12 @@ pangolin::Var<bool> continue_next("ui.continue_next", false, true);
 using Button = pangolin::Var<std::function<void(void)>>;
 
 Button next_step_btn("ui.next_step", &next_step);
+
+Button print_sim3_btn("ui.print_sim3", &print_sim3);
+
+Button alignSVD_btn("ui.align_svd", &align_svd);
+
+// Button correct_loop_btn("ui.correct_loop", &correct_loop);
 
 ///////////////////////////////////////////////////////////////////////////////
 /// GUI and Boilerplate Implementation
@@ -289,6 +333,8 @@ int main(int argc, char** argv) {
   // Load ORB Vocabulary
 
   orb_voc = new ORBVocabulary();
+  std::cout << "Loading the vocabulary ... (This might take a while)"
+            << std::endl;
   bool voc_load = orb_voc->loadFromTextFile(voc_path);
   if (!voc_load) {
     std::cerr << "Wrong path to vocabulary. " << std::endl;
@@ -365,9 +411,8 @@ int main(int argc, char** argv) {
       display3D.Activate(camera);
       glClearColor(0.95f, 0.95f, 0.95f, 1.0f);  // light gray background
       if (follow_frame) {
-        // camera.SetModelViewMatrix(
-        //     pangolin::ModelViewLookAt(0, -0.7, -1.8, 0, 0, 0, 0.0, -1.0,
-        //     0.0));
+        camera.SetModelViewMatrix(
+            pangolin::ModelViewLookAt(0, -0.7, -1.8, 0, 0, 0, 0.0, -1.0, 0.0));
         get_current_openGL_camera_matrix(M);
         camera.Follow(M);
       }
@@ -384,6 +429,16 @@ int main(int argc, char** argv) {
           change_display_to_image(FrameCamId(show_frame2, 0));
           change_display_to_image(FrameCamId(show_frame2, 1));
         }
+      }
+
+      if (frame1_id.GuiChanged()) {
+        show_frame1 = std::stoi(frame1_id.Get());
+        change_display_to_image(FrameCamId(show_frame1, 0));
+      }
+
+      if (frame2_id.GuiChanged()) {
+        show_frame2 = std::stoi(frame2_id.Get());
+        change_display_to_image(FrameCamId(show_frame2, 1));
       }
 
       if (show_frame1.GuiChanged() || show_cam1.GuiChanged()) {
@@ -865,40 +920,40 @@ void draw_scene() {
     glEnd();
   }
 
-  if (!loop_edges.empty()) {
-    glColor3ubv(color_selected_right);
-    for (const auto& edge : loop_edges) {
-      std::cout << "Loop Closure found: " << std::endl;
-      std::cout << "Frame " << edge.first.frame_id << " and Frame "
-                << edge.second.frame_id << std::endl;
+  if (show_loop_closing_edge) {
+    if (!loop_edges.empty()) {
+      glColor3ubv(color_selected_right);
+      for (const auto& edge : loop_edges) {
+        GLfloat start_gl[3];
+        start_gl[0] =
+            static_cast<GLfloat>(cameras.at(edge.first).T_w_c.translation()[0]);
+        start_gl[1] =
+            static_cast<GLfloat>(cameras.at(edge.first).T_w_c.translation()[1]);
+        start_gl[2] =
+            static_cast<GLfloat>(cameras.at(edge.first).T_w_c.translation()[2]);
+        GLfloat end_gl[3];
+        end_gl[0] = static_cast<GLfloat>(
+            cameras.at(edge.second).T_w_c.translation()[0]);
+        end_gl[1] = static_cast<GLfloat>(
+            cameras.at(edge.second).T_w_c.translation()[1]);
+        end_gl[2] = static_cast<GLfloat>(
+            cameras.at(edge.second).T_w_c.translation()[2]);
 
-      std::cout << "They have common landmarks: ";
-      for (const auto& kv : cameras.at(edge.first).map_points) {
-        if (cameras.at(edge.first).map_points.count(kv.first)) {
-          std::cout << kv.first << " ";
-        }
+        glBegin(GL_LINES);
+        glVertex3fv(start_gl);
+        glVertex3fv(end_gl);
+        glEnd();
       }
-      std::cout << std::endl;
-      GLfloat start_gl[3];
-      start_gl[0] =
-          static_cast<GLfloat>(cameras.at(edge.first).T_w_c.translation()[0]);
-      start_gl[1] =
-          static_cast<GLfloat>(cameras.at(edge.first).T_w_c.translation()[1]);
-      start_gl[2] =
-          static_cast<GLfloat>(cameras.at(edge.first).T_w_c.translation()[2]);
-      GLfloat end_gl[3];
-      end_gl[0] =
-          static_cast<GLfloat>(cameras.at(edge.second).T_w_c.translation()[0]);
-      end_gl[1] =
-          static_cast<GLfloat>(cameras.at(edge.second).T_w_c.translation()[1]);
-      end_gl[2] =
-          static_cast<GLfloat>(cameras.at(edge.second).T_w_c.translation()[2]);
-
-      glBegin(GL_LINES);
-      glVertex3fv(start_gl);
-      glVertex3fv(end_gl);
-      glEnd();
     }
+  }
+
+  if (show_gt) {
+    glColor3ubv(color_camera_current);
+    pangolin::glDrawLineStrip(gt_t_w_i);
+  }
+  if (show_vio_pt) {
+    glColor3ubv(color_selected_left);
+    pangolin::glDrawLineStrip(est_t_w_i);
   }
   // render points
   // if (show_old_points3d && old_landmarks.size() > 0) {
@@ -974,6 +1029,18 @@ void load_data(const std::string& dataset_path, const std::string& calib_path) {
   show_frame1.Meta().gui_changed = true;
   show_frame2.Meta().range[1] = images.size() / NUM_CAMS - 1;
   show_frame2.Meta().gui_changed = true;
+  DatasetIoInterfacePtr dataset_io =
+      DatasetIoFactory::getDatasetIo(dataset_type);
+  dataset_io->read(dataset_path);
+  // Load the ground true pose data
+  for (size_t i = 0; i < dataset_io->get_data()->get_gt_pose_data().size();
+       i++) {
+    gt_t_ns.push_back(dataset_io->get_data()->get_gt_timestamps()[i]);
+    gt_t_w_i.push_back(
+        dataset_io->get_data()->get_gt_pose_data()[i].translation());
+  }
+  std::cout << "Successfully loaded ground-true data with size of "
+            << gt_t_w_i.size() << std::endl;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -995,8 +1062,13 @@ bool next_step() {
         projected_points;
     std::vector<TrackId> projected_track_ids;
 
-    project_landmarks(current_pose, calib_cam.intrinsics[0], landmarks,
-                      cam_z_threshold, projected_points, projected_track_ids);
+    if (tracking_successful) {
+      project_landmarks(current_pose * vel, calib_cam.intrinsics[0], landmarks,
+                        cam_z_threshold, projected_points, projected_track_ids);
+    } else {
+      project_landmarks(current_pose, calib_cam.intrinsics[0], landmarks,
+                        cam_z_threshold, projected_points, projected_track_ids);
+    }
 
     std::cout << "KF Projected " << projected_track_ids.size() << " points."
               << std::endl;
@@ -1048,22 +1120,38 @@ bool next_step() {
 
     std::cout << "KF Found " << md.matches.size() << " matches." << std::endl;
 
-    localize_camera(current_pose, calib_cam.intrinsics[0], kdl, landmarks,
-                    reprojection_error_pnp_inlier_threshold_pixel, md);
-
-    current_pose = md.T_w_c;
+    // localize_camera(current_pose, calib_cam.intrinsics[0], kdl, landmarks,
+    //                 reprojection_error_pnp_inlier_threshold_pixel, md);
+    tracking_successful =
+        track_camera(current_pose, calib_cam.intrinsics[0], kdl, landmarks,
+                     reprojection_error_pnp_inlier_threshold_pixel, md, vel,
+                     motion_threshold, tracking_successful);
+    if (!tracking_successful) {
+      Sophus::SE3d reloc_pose;
+      if (!relocalize_camera(fcidl, images[fcidl], calib_cam, orb, orb_voc,
+                             orb_db, cameras, vel, current_pose,
+                             motion_threshold, reloc_pose)) {
+        current_pose = md.T_w_c;
+      } else {
+        current_pose = reloc_pose;
+        tracking_successful = true;
+      }
+    } else {
+      current_pose = md.T_w_c;
+    }
 
     add_new_landmarks(fcidl, fcidr, kdl, kdr, calib_cam, md_stereo, md,
                       landmarks, next_landmark_id);
     Camera current_cam_left;
     Camera current_cam_right;
+    current_cam_left.T_w_c = current_pose;
     construct_visibility_graph(fcidl, cameras, landmarks, current_cam_left,
                                graph, num_cov_threshold);
     // construct_visibility_graph(fcidr, cameras, landmarks, current_cam_right,
     //                            graph, num_cov_threshold);
-    current_cam_left.T_w_c = current_pose;
     current_cam_left.active = true;
     current_cam_left.last_fcid = last_kf_fcid;
+    current_cam_left.img_path = images[fcidl];
     cv::Mat imgl_cv = cv::imread(images[fcidl]);
     compute_bow_vector(imgl_cv, orb, num_features_per_image, orb_voc,
                        current_cam_left.bow_vector,
@@ -1076,17 +1164,39 @@ bool next_step() {
 
     current_cam_right.T_w_c = current_pose * T_0_1;
     current_cam_right.active = true;
-
+    current_cam_right.img_path = images[fcidr];
     loop_detected = detect_loop_closure(
         fcidl, current_cam_left, cameras, orb_db, orb_voc, graph,
         consistent_groups, enough_consistent_candidates, num_cov_threshold * 2,
         num_consistency);
     if (loop_detected) {
       for (int i = 0; i < enough_consistent_candidates.size(); i++) {
-        loop_edges.push_back(
-            std::make_pair(fcidl, enough_consistent_candidates[i]));
+        if (fcidl.frame_id - enough_consistent_candidates[i].frame_id >
+            loop_closing_time_threshold) {
+          if (compute_sim3_opengv(calib_cam, enough_consistent_candidates[i],
+                                  fcidl,
+                                  cameras.at(enough_consistent_candidates[i]),
+                                  current_cam_left, feature_corners, sim3)) {
+            loop_edges.push_back(
+                std::make_pair(fcidl, enough_consistent_candidates[i]));
+            if (!use_sim3) {
+              sim3.translation() = Eigen::Vector3d(0, 0, 0);
+            }
+            std::pair<FrameCamId, FrameCamId> edge = *loop_edges.rbegin();
+            std::cout << "Frame " << edge.first.frame_id << " and Frame "
+                      << edge.second.frame_id << std::endl;
+
+            std::cout << "The computed Sim(3) is: " << std::endl;
+            std::cout << sim3.rotationMatrix() << std::endl;
+
+            std::cout << sim3.translation() << std::endl;
+            loop_closure(edge.first, current_cam_left, edge.second, T_0_1, sim3,
+                         cameras, landmarks, num_ess_threshold);
+          }
+        }
       }
     }
+
     cameras[fcidl] = current_cam_left;
     cameras[fcidr] = current_cam_right;
 
@@ -1122,6 +1232,8 @@ bool next_step() {
     compute_projections();
 
     current_frame++;
+    vel = last_pose.inverse() * current_pose;
+    last_pose = current_pose;
     return true;
   } else {
     FrameCamId fcidl(current_frame, 0), fcidr(current_frame, 1);
@@ -1129,9 +1241,13 @@ bool next_step() {
     std::vector<Eigen::Vector2d, Eigen::aligned_allocator<Eigen::Vector2d>>
         projected_points;
     std::vector<TrackId> projected_track_ids;
-
-    project_landmarks(current_pose, calib_cam.intrinsics[0], landmarks,
-                      cam_z_threshold, projected_points, projected_track_ids);
+    if (tracking_successful) {
+      project_landmarks(current_pose * vel, calib_cam.intrinsics[0], landmarks,
+                        cam_z_threshold, projected_points, projected_track_ids);
+    } else {
+      project_landmarks(current_pose, calib_cam.intrinsics[0], landmarks,
+                        cam_z_threshold, projected_points, projected_track_ids);
+    }
 
     std::cout << "Projected " << projected_track_ids.size() << " points."
               << std::endl;
@@ -1155,10 +1271,26 @@ bool next_step() {
 
     std::cout << "Found " << md.matches.size() << " matches." << std::endl;
 
-    localize_camera(current_pose, calib_cam.intrinsics[0], kdl, landmarks,
-                    reprojection_error_pnp_inlier_threshold_pixel, md);
+    // localize_camera(current_pose, calib_cam.intrinsics[0], kdl, landmarks,
+    //                 reprojection_error_pnp_inlier_threshold_pixel, md);
 
-    current_pose = md.T_w_c;
+    tracking_successful =
+        track_camera(current_pose, calib_cam.intrinsics[0], kdl, landmarks,
+                     reprojection_error_pnp_inlier_threshold_pixel, md, vel,
+                     motion_threshold, tracking_successful);
+    if (!tracking_successful) {
+      Sophus::SE3d reloc_pose;
+      if (!relocalize_camera(fcidl, images[fcidl], calib_cam, orb, orb_voc,
+                             orb_db, cameras, vel, current_pose,
+                             motion_threshold, reloc_pose)) {
+        current_pose = md.T_w_c;
+      } else {
+        current_pose = reloc_pose;
+        tracking_successful = true;
+      }
+    } else {
+      current_pose = md.T_w_c;
+    }
 
     // Compute the number of newly observed features with the most recently
     // selected keyframe
@@ -1183,7 +1315,15 @@ bool next_step() {
         landmarks.at(kv.first) = kv.second;
       }
       for (const auto& kv : cameras_opt) {
+        // update the relative poses
+        std::map<FrameCamId, Sophus::SE3d> updated_covisible_rel_poses;
+        for (const auto& fcid_rel : kv.second.covisible_rel_poses) {
+          updated_covisible_rel_poses.emplace(std::make_pair(
+              fcid_rel.first,
+              kv.second.T_w_c.inverse() * cameras.at(fcid_rel.first).T_w_c));
+        }
         cameras.at(kv.first) = kv.second;
+        cameras.at(kv.first).covisible_rel_poses = updated_covisible_rel_poses;
       }
       // landmarks = landmarks_opt;
       // cameras = cameras_opt;
@@ -1196,10 +1336,11 @@ bool next_step() {
     change_display_to_image(fcidr);
 
     current_frame++;
+    vel = last_pose.inverse() * current_pose;
+    last_pose = current_pose;
     return true;
   }
 }
-
 // Compute reprojections for all landmark observations for visualization and
 // outlier removal.
 void compute_projections() {
@@ -1310,4 +1451,156 @@ void optimize() {
 
   // Update project info cache
   compute_projections();
+}
+
+void print_sim3() {
+  for (const auto& edge : loop_edges) {
+    std::cout << "Loop Closure found: " << std::endl;
+    std::cout << "Frame " << edge.first.frame_id << " and Frame "
+              << edge.second.frame_id << std::endl;
+
+    compute_sim3_opengv(calib_cam, edge.second, edge.first,
+                        cameras.at(edge.second), cameras.at(edge.first),
+                        feature_corners, sim3);
+    rel_trans =
+        cameras.at(edge.second).T_w_c.inverse() * cameras.at(edge.first).T_w_c;
+    std::cout << "The computed Sim(3) is: " << std::endl;
+    std::cout << sim3.rotationMatrix() << std::endl;
+
+    std::cout << sim3.translation() << std::endl;
+
+    std::cout << "Current relative transformation is: " << std::endl;
+    std::cout << rel_trans.rotationMatrix() << std::endl;
+
+    std::cout << rel_trans.translation() << std::endl;
+    std::cout << std::endl;
+  }
+}
+
+// void correct_loop() {
+//   const Sophus::SE3d T_0_1 = calib_cam.T_i_c[0].inverse() *
+//   calib_cam.T_i_c[1]; std::pair<FrameCamId, FrameCamId> edge =
+//   *loop_edges.rbegin();
+//   // compute_sim3_opengv(calib_cam, edge.first, edge.second,
+//   //                     cameras.at(edge.first), cameras.at(edge.second),
+//   sim3); std::cout << "Frame " << edge.first.frame_id << " and Frame "
+//             << edge.second.frame_id << std::endl;
+
+//   compute_sim3_opengv(calib_cam, edge.second, edge.first,
+//                       cameras.at(edge.second), cameras.at(edge.first),
+//                       feature_corners, sim3);
+//   std::cout << "The computed Sim(3) is: " << std::endl;
+//   std::cout << sim3.rotationMatrix() << std::endl;
+
+//   std::cout << sim3.translation() << std::endl;
+//   // loop_align(edge.first, cameras.at(edge.first), edge.second, graph,
+//   T_0_1,
+//   //            sim3, cameras, landmarks);
+//   loop_closure(edge.first, cameras.at(edge.first), edge.second, T_0_1, sim3,
+//                cameras, landmarks);
+// }
+double alignSVD(
+    const std::vector<int64_t>& filter_t_ns,
+    const std::vector<Eigen::Vector3d,
+                      Eigen::aligned_allocator<Eigen::Vector3d>>& filter_t_w_i,
+    const std::vector<int64_t>& gt_t_ns,
+    std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d>>&
+        gt_t_w_i) {
+  std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d>>
+      est_associations;
+  std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d>>
+      gt_associations;
+
+  for (size_t i = 0; i < filter_t_w_i.size(); i++) {
+    int64_t t_ns = filter_t_ns[i];
+
+    size_t j;
+    for (j = 0; j < gt_t_ns.size(); j++) {
+      if (gt_t_ns.at(j) > t_ns) break;
+    }
+    j--;
+
+    if (j >= gt_t_ns.size() - 1) {
+      continue;
+    }
+
+    double dt_ns = t_ns - gt_t_ns.at(j);
+    double int_t_ns = gt_t_ns.at(j + 1) - gt_t_ns.at(j);
+
+    // Skip if the interval between gt larger than 100ms
+    if (int_t_ns > 1.1e8) continue;
+
+    double ratio = dt_ns / int_t_ns;
+
+    Eigen::Vector3d gt = (1 - ratio) * gt_t_w_i[j] + ratio * gt_t_w_i[j + 1];
+
+    gt_associations.emplace_back(gt);
+    est_associations.emplace_back(filter_t_w_i[i]);
+  }
+
+  int num_kfs = est_associations.size();
+
+  Eigen::Matrix<double, 3, Eigen::Dynamic> gt, est;
+  gt.setZero(3, num_kfs);
+  est.setZero(3, num_kfs);
+
+  for (size_t i = 0; i < est_associations.size(); i++) {
+    gt.col(i) = gt_associations[i];
+    est.col(i) = est_associations[i];
+  }
+
+  Eigen::Vector3d mean_gt = gt.rowwise().mean();
+  Eigen::Vector3d mean_est = est.rowwise().mean();
+
+  gt.colwise() -= mean_gt;
+  est.colwise() -= mean_est;
+
+  Eigen::Matrix3d cov = gt * est.transpose();
+
+  Eigen::JacobiSVD<Eigen::Matrix3d> svd(
+      cov, Eigen::ComputeFullU | Eigen::ComputeFullV);
+
+  Eigen::Matrix3d S;
+  S.setIdentity();
+
+  if (svd.matrixU().determinant() * svd.matrixV().determinant() < 0)
+    S(2, 2) = -1;
+
+  Eigen::Matrix3d rot_gt_est = svd.matrixU() * S * svd.matrixV().transpose();
+  Eigen::Vector3d trans = mean_gt - rot_gt_est * mean_est;
+
+  Sophus::SE3d T_gt_est(rot_gt_est, trans);
+  Sophus::SE3d T_est_gt = T_gt_est.inverse();
+
+  for (size_t i = 0; i < gt_t_w_i.size(); i++) {
+    gt_t_w_i[i] = T_est_gt * gt_t_w_i[i];
+  }
+
+  double error = 0;
+  for (size_t i = 0; i < est_associations.size(); i++) {
+    est_associations[i] = T_gt_est * est_associations[i];
+    Eigen::Vector3d res = est_associations[i] - gt_associations[i];
+
+    error += res.transpose() * res;
+  }
+
+  error /= est_associations.size();
+  error = std::sqrt(error);
+
+  std::cout << "T_align\n" << T_gt_est.matrix() << std::endl;
+  std::cout << "error " << error << std::endl;
+  std::cout << "number of associations " << num_kfs << std::endl;
+  return error;
+}
+
+double align_svd() {
+  for (const auto& kv : cameras) {
+    if (kv.first.cam_id == 0) {
+      est_t_w_i.push_back(
+          (kv.second.T_w_c * calib_cam.T_i_c[0].inverse()).translation());
+      est_t_ns.push_back(timestamps[kv.first.frame_id]);
+    }
+  }
+  double error = alignSVD(est_t_ns, est_t_w_i, gt_t_ns, gt_t_w_i);
+  return error;
 }
