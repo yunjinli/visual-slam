@@ -227,6 +227,11 @@ struct Landmark {
   /// 3d position in world coordinates
   Eigen::Vector3d p;
 
+  /// 3d position in the camera coordinates -> the camera that created this
+  /// landmark
+  Eigen::Vector3d p_c;
+  /// Which camera create this landmark
+  FrameCamId from_fcid;
   /// Inlier observations in the current map.
   /// This is a subset of the original feature track.
   FeatureTrack obs;

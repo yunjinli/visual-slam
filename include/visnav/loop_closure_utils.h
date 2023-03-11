@@ -563,6 +563,23 @@ void update_stereo_pair(const FrameCamId& cur_kf_fcid, Camera cur_kf,
     }
   }
 }
+
+void update_landmark_position(const FrameCamId& cur_kf_fcid,
+                              const Camera& cur_kf, const Cameras& keyframes,
+                              Landmarks& landmarks) {
+  for (auto& kv : landmarks) {
+    if (keyframes.count(kv.second.from_fcid)) {
+      kv.second.p = keyframes.at(kv.second.from_fcid).T_w_c * kv.second.p_c;
+    } else {
+      if (cur_kf_fcid == kv.second.from_fcid) {
+        kv.second.p = cur_kf.T_w_c * kv.second.p_c;
+      } else {
+        // Do nothing
+      }
+    }
+  }
+}
+
 void loop_closure(const FrameCamId& cur_kf_fcid, Camera cur_kf,
                   const FrameCamId& loop_candidate_fcid,
                   const Sophus::SE3d T_0_1, const Sophus::SE3d& sim3,
@@ -575,5 +592,8 @@ void loop_closure(const FrameCamId& cur_kf_fcid, Camera cur_kf,
                           keyframes, essential_threshold);
   // update stereo pair
   update_stereo_pair(cur_kf_fcid, cur_kf, T_0_1, keyframes);
+
+  // update the landmark positions
+  update_landmark_position(cur_kf_fcid, cur_kf, keyframes, landmarks);
 }
 }  // namespace visnav

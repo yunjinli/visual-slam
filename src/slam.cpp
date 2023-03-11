@@ -1313,6 +1313,15 @@ bool next_step() {
       opt_thread->join();
       for (const auto& kv : landmarks_opt) {
         landmarks.at(kv.first) = kv.second;
+        if (cameras_opt.count(landmarks.at(kv.first).from_fcid)) {
+          landmarks.at(kv.first).p_c =
+              cameras_opt.at(landmarks.at(kv.first).from_fcid).T_w_c.inverse() *
+              landmarks.at(kv.first).p;
+        } else {
+          landmarks.at(kv.first).p_c =
+              cameras.at(landmarks.at(kv.first).from_fcid).T_w_c.inverse() *
+              landmarks.at(kv.first).p;
+        }
       }
       for (const auto& kv : cameras_opt) {
         // update the relative poses
