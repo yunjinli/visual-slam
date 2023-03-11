@@ -1,7 +1,7 @@
 #include <io/dataset_io.h>
 #include <io/dataset_io_euroc.h>
 
-namespace slam {
+namespace visnav {
 
 DatasetIoInterfacePtr DatasetIoFactory::getDatasetIo(
     const std::string &dataset_type) {
@@ -14,4 +14,4 @@ DatasetIoInterfacePtr DatasetIoFactory::getDatasetIo(
   }
 }
 
-}  // namespace slam
+}  // namespace visnav

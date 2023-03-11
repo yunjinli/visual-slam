@@ -63,6 +63,7 @@ BUILD_CERES=thirdparty/build-ceres-solver
 BUILD_PANGOLIN=thirdparty/build-Pangolin
 BUILD_OPENGV=thirdparty/build-opengv
 BUILD_OPENCV=thirdparty/build-opencv
+# BUILD_DBoW2=thirdparty/build-DBoW2
 
 git submodule sync --recursive
 git submodule update --init --recursive
@@ -71,6 +72,7 @@ rm -rf "$BUILD_CERES"
 rm -rf "$BUILD_PANGOLIN"
 rm -rf "$BUILD_OPENGV"
 rm -rf "$BUILD_OPENCV"
+# rm -rf "$BUILD_DBoW2"
 
 mkdir -p "$BUILD_CERES"
 pushd "$BUILD_CERES"
@@ -105,8 +107,21 @@ popd
 
 mkdir -p "$BUILD_OPENCV"
 pushd "$BUILD_OPENCV"
-cmake ../opencv "${COMMON_CMAKE_ARGS[@]}" \
-    -DBUILD_EXAMPLES=OFF 
+cmake ../opencv -DBUILD_EXAMPLES=OFF 
 make -j$NUM_PARALLEL_BUILDS
 popd
+
+# mkdir -p "$BUILD_DBoW2"
+# pushd "$BUILD_DBoW2"
+# cmake ../DBoW2 "${COMMON_CMAKE_ARGS[@]}" \
+#     -DBUILD_EXAMPLES=OFF \
+#     -DCMAKE_FIND_ROOT_PATH=../build-opencv
+# make -j$NUM_PARALLEL_BUILDS
+# popd
+
+echo "Uncompress vocabulary ..."
+
+cd Vocabulary
+tar -xf ORBvoc.txt.tar.gz
+cd ..
 

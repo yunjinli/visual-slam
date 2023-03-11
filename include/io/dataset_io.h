@@ -5,7 +5,7 @@
 
 #pragma once
 
-namespace slam {
+namespace visnav {
 
 class Dataset {
  public:
@@ -41,4 +41,4 @@ class DatasetIoFactory {
   static DatasetIoInterfacePtr getDatasetIo(const std::string &dataset_type);
 };
 
-}  // namespace slam
+}  // namespace visnav

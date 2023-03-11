@@ -32,17 +32,17 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #pragma once
 
-#include <bitset>
-#include <set>
+#include <pangolin/image/managed_image.h>
+#include <visnav/ORBVocabulary.h>
+#include <visnav/common_types.h>
+#include <visnav/converter.h>
 
 #include <Eigen/Dense>
-#include <sophus/se3.hpp>
-
-#include <pangolin/image/managed_image.h>
-
+#include <bitset>
 #include <opencv2/imgproc/imgproc.hpp>
-
-#include <visnav/common_types.h>
+#include <opencv2/opencv.hpp>
+#include <set>
+#include <sophus/se3.hpp>
 
 namespace visnav {
 
@@ -135,7 +135,8 @@ void detectKeypoints(const pangolin::ManagedImage<uint8_t>& img_raw,
   cv::Mat image(img_raw.h, img_raw.w, CV_8U, img_raw.ptr);
 
   std::vector<cv::Point2f> points;
-  goodFeaturesToTrack(image, points, num_features, 0.01, 8);
+  goodFeaturesToTrack(image, points, num_features, 0.01, 8, cv::noArray(), 3,
+                      false);
 
   kd.corners.clear();
   kd.corner_angles.clear();
@@ -227,6 +228,31 @@ void detectKeypointsAndDescriptors(
   computeDescriptors(img_raw, kd);
 }
 
+/// @brief Compute the keypoints and descriptors of a image
+/// @param img_raw Input image
+/// @param kd KeypointsData which contain descriptors and keypoint positions
+/// @param orb ORB object from OpenCV that uses for computing the keypoints and
+/// descriptors
+// void detectKeypointsAndDescriptors(const cv::Mat& img_raw, KeypointsData& kd,
+//                                    cv::Ptr<cv::ORB>& orb) {
+//   std::vector<cv::KeyPoint> keypoints;
+//   orb->detectAndCompute(img_raw, cv::Mat(), keypoints,
+//   kd.corner_descriptors); to_eigen_keypoints(keypoints, kd.corners);
+// }
+
+void compute_bow_vector(const cv::Mat& img_raw, cv::Ptr<cv::ORB> orb,
+                        int num_features, const ORBVocabulary* voc,
+                        DBoW2::BowVector& bow_vector,
+                        DBoW2::FeatureVector& feature_vector) {
+  std::vector<cv::KeyPoint> keypoints;
+  cv::Mat corner_descriptors;
+  orb = cv::ORB::create(num_features, 1.2, 8, 19, 0, 2, cv::ORB::FAST_SCORE);
+  orb->detectAndCompute(img_raw, cv::Mat(), keypoints, corner_descriptors);
+  std::vector<cv::Mat> current_descriptors =
+      to_descriptor_vector(corner_descriptors);
+  voc->transform(current_descriptors, bow_vector, feature_vector, 4);
+}
+
 bool checkStillBest(const int& best_distance, const int& best_id1,
                     const std::bitset<256>& best_descriptor,
                     const std::vector<std::bitset<256>>& corner_descriptors_1,
@@ -286,6 +312,14 @@ bool isPQiffQP(const std::vector<std::bitset<256>>& corner_descriptors_1,
   return false;
 }
 
+// void matchDescriptors(const cv::Mat& corner_descriptors_1,
+//                       const cv::Mat& corner_descriptors_2,
+//                       cv::BFMatcher matcher,
+//                       std::vector<std::pair<int, int>>& matches) {
+//   std::vector<cv::DMatch> cv_matches;
+//   matcher.match(corner_descriptors_1, corner_descriptors_2, cv_matches);
+//   to_std_pair_matches(cv_matches, matches);
+// }
 void matchDescriptors(const std::vector<std::bitset<256>>& corner_descriptors_1,
                       const std::vector<std::bitset<256>>& corner_descriptors_2,
                       std::vector<std::pair<int, int>>& matches, int threshold,

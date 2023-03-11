@@ -181,11 +181,11 @@ void serialize(Archive& ar, LandmarkMatchData& m) {
   ar(CEREAL_NVP(m.T_w_c), CEREAL_NVP(m.inliers), CEREAL_NVP(m.matches));
 }
 
-template <class Archive>
-void serialize(Archive& ar, KeypointsData& m) {
-  ar(CEREAL_NVP(m.corners), CEREAL_NVP(m.corner_angles),
-     CEREAL_NVP(m.corner_descriptors));
-}
+// template <class Archive>
+// void serialize(Archive& ar, KeypointsData& m) {
+//   ar(CEREAL_NVP(m.corners), CEREAL_NVP(m.corner_angles),
+//      CEREAL_NVP(m.corner_descriptors));
+// }
 
 template <class Archive>
 void serialize(Archive& ar, Camera& c) {
