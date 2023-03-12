@@ -76,7 +76,7 @@ void load_data(const std::string& path, const std::string& calib_path);
 bool next_step();
 void optimize();
 void compute_projections();
-void print_sim3();
+// void print_sim3();
 double alignSVD(
     const std::vector<int64_t>& filter_t_ns,
     const std::vector<Eigen::Vector3d,
@@ -291,7 +291,7 @@ using Button = pangolin::Var<std::function<void(void)>>;
 
 Button next_step_btn("ui.next_step", &next_step);
 
-Button print_sim3_btn("ui.print_sim3", &print_sim3);
+// Button print_sim3_btn("ui.print_sim3", &print_sim3);
 
 Button alignSVD_btn("ui.align_svd", &align_svd);
 
@@ -306,8 +306,10 @@ Button alignSVD_btn("ui.align_svd", &align_svd);
 int main(int argc, char** argv) {
   bool show_gui = true;
 
-  std::string dataset_path = "../data/V1_01_easy/mav0/";
-  std::string cam_calib = "../opt_calib.json";
+  // std::string dataset_path = "../data/V1_01_easy/mav0/";
+  std::string dataset_path = "../data/euro_data/MH_04_difficult/mav0/";
+  // std::string cam_calib = "../opt_calib.json";
+  std::string cam_calib = "../euroc_ds_calib_visnav_type.json";
   std::string voc_path = "../Vocabulary/ORBvoc.txt";
   CLI::App app{"Visual odometry."};
 
@@ -1171,13 +1173,13 @@ bool next_step() {
         consistent_groups, enough_consistent_candidates, num_cov_threshold * 2,
         num_consistency);
     if (loop_detected) {
-      for (int i = 0; i < enough_consistent_candidates.size(); i++) {
+      for (size_t i = 0; i < enough_consistent_candidates.size(); i++) {
         if (fcidl.frame_id - enough_consistent_candidates[i].frame_id >
             loop_closing_time_threshold) {
-          if (compute_sim3_opengv(calib_cam, enough_consistent_candidates[i],
-                                  fcidl,
-                                  cameras.at(enough_consistent_candidates[i]),
-                                  current_cam_left, feature_corners, sim3)) {
+          if (compute_sim3(calib_cam, fcidl, enough_consistent_candidates[i],
+                           feature_corners, cameras, landmarks, graph,
+                           reprojection_error_pnp_inlier_threshold_pixel,
+                           sim3)) {
             loop_edges.push_back(
                 std::make_pair(fcidl, enough_consistent_candidates[i]));
             if (!use_sim3) {
@@ -1467,29 +1469,30 @@ void optimize() {
   compute_projections();
 }
 
-void print_sim3() {
-  for (const auto& edge : loop_edges) {
-    std::cout << "Loop Closure found: " << std::endl;
-    std::cout << "Frame " << edge.first.frame_id << " and Frame "
-              << edge.second.frame_id << std::endl;
+// void print_sim3() {
+//   for (const auto& edge : loop_edges) {
+//     std::cout << "Loop Closure found: " << std::endl;
+//     std::cout << "Frame " << edge.first.frame_id << " and Frame "
+//               << edge.second.frame_id << std::endl;
 
-    compute_sim3_opengv(calib_cam, edge.second, edge.first,
-                        cameras.at(edge.second), cameras.at(edge.first),
-                        feature_corners, sim3);
-    rel_trans =
-        cameras.at(edge.second).T_w_c.inverse() * cameras.at(edge.first).T_w_c;
-    std::cout << "The computed Sim(3) is: " << std::endl;
-    std::cout << sim3.rotationMatrix() << std::endl;
+//     compute_sim3_opengv(calib_cam, edge.second, edge.first,
+//                         cameras.at(edge.second), cameras.at(edge.first),
+//                         feature_corners, sim3);
+//     rel_trans =
+//         cameras.at(edge.second).T_w_c.inverse() *
+//         cameras.at(edge.first).T_w_c;
+//     std::cout << "The computed Sim(3) is: " << std::endl;
+//     std::cout << sim3.rotationMatrix() << std::endl;
 
-    std::cout << sim3.translation() << std::endl;
+//     std::cout << sim3.translation() << std::endl;
 
-    std::cout << "Current relative transformation is: " << std::endl;
-    std::cout << rel_trans.rotationMatrix() << std::endl;
+//     std::cout << "Current relative transformation is: " << std::endl;
+//     std::cout << rel_trans.rotationMatrix() << std::endl;
 
-    std::cout << rel_trans.translation() << std::endl;
-    std::cout << std::endl;
-  }
-}
+//     std::cout << rel_trans.translation() << std::endl;
+//     std::cout << std::endl;
+//   }
+// }
 
 // void correct_loop() {
 //   const Sophus::SE3d T_0_1 = calib_cam.T_i_c[0].inverse() *
