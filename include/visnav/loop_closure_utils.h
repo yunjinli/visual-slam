@@ -647,4 +647,96 @@ void loop_closure(const FrameCamId& cur_kf_fcid, Camera cur_kf,
   // update the landmark positions
   update_landmark_position(cur_kf_fcid, cur_kf, keyframes, landmarks);
 }
+
+struct GlobalBundleAdjustmentOptions {
+  /// 0: silent, 1: ceres brief report (one line), 2: ceres full report
+  int verbosity_level = 1;
+
+  /// use huber robust norm or squared norm
+  bool use_huber = true;
+
+  /// parameter for huber loss (in pixel)
+  double huber_parameter = 1.0;
+
+  /// maximum number of solver iterations
+  int max_num_iterations = 20;
+};
+// Run bundle adjustment to optimize cameras, points, and optionally intrinsics
+void global_bundle_adjustment(const Corners& feature_corners,
+                              const GlobalBundleAdjustmentOptions& options,
+                              const std::set<FrameCamId>& fixed_cameras,
+                              Calibration& calib_cam, Cameras& cameras,
+                              Landmarks& landmarks) {
+  ceres::Problem problem;
+  /* -----Quick Reminder-----
+   * 1. feature_corners.at(fcid).at(feature_id) would give us the 2d vector ->
+   * detected corner in the image
+   * 2. Landmarks = std::unordered_map<TrackId, Landmark>;
+   */
+  /*
+   * -----Quick Thought about the implementation-----
+   * 1. Since we have local parametrization, so first add those needed parameter
+   * block into our problem
+   * 2. Iterate through all the landmarks, use all of its inliers observation to
+   * calculate residual.
+   */
+  // Iterate through cameras to add T_w_c of each camera in to the parameter
+  // block using local parametrization
+  for (auto& kv : cameras) {
+    problem.AddParameterBlock(kv.second.T_w_c.data(),
+                              Sophus::SE3d::num_parameters,
+                              new Sophus::test::LocalParameterizationSE3);
+    // Set the fixed frame paramter constant
+    if (fixed_cameras.find(kv.first) != fixed_cameras.end()) {
+      problem.SetParameterBlockConstant(kv.second.T_w_c.data());
+    }
+  }
+
+  for (auto& kv : landmarks) {
+    const auto& t_id = kv.first;
+    auto& lm = kv.second;
+    auto& p_3d = lm.p;
+    for (const auto& ob : lm.all_obs) {
+      const auto& fcid = ob.first;
+      const auto& f_id = ob.second;
+      const auto& p_2d = feature_corners.at(fcid).corners[f_id];
+      BundleAdjustmentReprojectionCostFunctor* c =
+          new BundleAdjustmentReprojectionCostFunctor(
+              p_2d, calib_cam.intrinsics[fcid.cam_id]->name());
+      ceres::CostFunction* cost_function = new ceres::AutoDiffCostFunction<
+          BundleAdjustmentReprojectionCostFunctor, 2,
+          Sophus::SE3d::num_parameters, 3, 8>(c);
+
+      if (options.use_huber) {
+        problem.AddResidualBlock(cost_function,
+                                 new ceres::HuberLoss(options.huber_parameter),
+                                 cameras.at(fcid).T_w_c.data(), p_3d.data(),
+                                 calib_cam.intrinsics[fcid.cam_id]->data());
+      } else {
+        problem.AddResidualBlock(cost_function, NULL,
+                                 cameras.at(fcid).T_w_c.data(), p_3d.data(),
+                                 calib_cam.intrinsics[fcid.cam_id]->data());
+      }
+    }
+  }
+  problem.SetParameterBlockConstant(calib_cam.intrinsics[0]->data());
+  problem.SetParameterBlockConstant(calib_cam.intrinsics[1]->data());
+
+  // Solve
+  ceres::Solver::Options ceres_options;
+  ceres_options.max_num_iterations = options.max_num_iterations;
+  ceres_options.linear_solver_type = ceres::SPARSE_SCHUR;
+  ceres_options.num_threads = std::thread::hardware_concurrency();
+  ceres::Solver::Summary summary;
+  Solve(ceres_options, &problem, &summary);
+  switch (options.verbosity_level) {
+    // 0: silent
+    case 1:
+      std::cout << summary.BriefReport() << std::endl;
+      break;
+    case 2:
+      std::cout << summary.FullReport() << std::endl;
+      break;
+  }
+}
 }  // namespace visnav

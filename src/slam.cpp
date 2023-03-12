@@ -85,6 +85,7 @@ double alignSVD(
     std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d>>&
         gt_t_w_i);
 double align_svd();
+void global_ba();
 // void correct_loop();
 ///////////////////////////////////////////////////////////////////////////////
 /// Constants
@@ -258,6 +259,9 @@ pangolin::Var<bool> show_cov("hidden.show_cov", true, true);
 pangolin::Var<int> num_ess_threshold("hidden.num_ess_threshold", 30, 1, 100);
 pangolin::Var<bool> show_essential("hidden.show_essential", false, true);
 pangolin::Var<bool> show_spanning_tree("hidden.show_spanning_tree", true, true);
+
+// For Loop Closing
+pangolin::Var<bool> enable_loop_closure("hidden.loop_closure", true, true);
 pangolin::Var<int> num_consistency("hidden.num_consistency", 3, 1, 15);
 pangolin::Var<bool> show_loop_closing_edge("hidden.show_loop", true, true);
 pangolin::Var<int> loop_closing_time_threshold("hidden.loop_closing_time", 500,
@@ -291,6 +295,7 @@ using Button = pangolin::Var<std::function<void(void)>>;
 
 Button next_step_btn("ui.next_step", &next_step);
 
+Button global_ba_btn("ui.global_ba", &global_ba);
 // Button print_sim3_btn("ui.print_sim3", &print_sim3);
 
 Button alignSVD_btn("ui.align_svd", &align_svd);
@@ -1169,37 +1174,40 @@ bool next_step() {
     current_cam_right.T_w_c = current_pose * T_0_1;
     current_cam_right.active = true;
     current_cam_right.img_path = images[fcidr];
-    loop_detected = detect_loop_closure(
-        fcidl, current_cam_left, cameras, orb_db, orb_voc, graph,
-        consistent_groups, enough_consistent_candidates, num_cov_threshold * 2,
-        num_consistency);
-    if (loop_detected) {
-      for (size_t i = 0; i < enough_consistent_candidates.size(); i++) {
-        if (fcidl.frame_id - enough_consistent_candidates[i].frame_id >
-            loop_closing_time_threshold) {
-          if (compute_sim3(calib_cam, fcidl, enough_consistent_candidates[i],
-                           feature_corners, cameras, landmarks, graph,
-                           reprojection_error_pnp_inlier_threshold_pixel,
-                           sim3)) {
-            loop_edges.push_back(
-                std::make_pair(fcidl, enough_consistent_candidates[i]));
-            if (!use_sim3) {
-              sim3.setRotationMatrix(Eigen::Matrix3d().setIdentity());
-              sim3.translation() = Eigen::Vector3d(0, 0, 0);
+
+    if (enable_loop_closure) {
+      loop_detected = detect_loop_closure(
+          fcidl, current_cam_left, cameras, orb_db, orb_voc, graph,
+          consistent_groups, enough_consistent_candidates,
+          num_cov_threshold * 2, num_consistency);
+      if (loop_detected) {
+        for (size_t i = 0; i < enough_consistent_candidates.size(); i++) {
+          if (fcidl.frame_id - enough_consistent_candidates[i].frame_id >
+              loop_closing_time_threshold) {
+            if (compute_sim3(calib_cam, fcidl, enough_consistent_candidates[i],
+                             feature_corners, cameras, landmarks, graph,
+                             reprojection_error_pnp_inlier_threshold_pixel,
+                             sim3)) {
+              loop_edges.push_back(
+                  std::make_pair(fcidl, enough_consistent_candidates[i]));
+              if (!use_sim3) {
+                sim3.setRotationMatrix(Eigen::Matrix3d().setIdentity());
+                sim3.translation() = Eigen::Vector3d(0, 0, 0);
+              }
+              loop_closure_options.set_current_kf_fixed = fixed_current_kf;
+
+              std::pair<FrameCamId, FrameCamId> edge = *loop_edges.rbegin();
+              std::cout << "Frame " << edge.first.frame_id << " and Frame "
+                        << edge.second.frame_id << std::endl;
+
+              std::cout << "The computed Sim(3) is: " << std::endl;
+              std::cout << sim3.rotationMatrix() << std::endl;
+
+              std::cout << sim3.translation() << std::endl;
+              loop_closure(edge.first, current_cam_left, edge.second, T_0_1,
+                           sim3, cameras, landmarks, num_ess_threshold,
+                           loop_closure_options);
             }
-            loop_closure_options.set_current_kf_fixed = fixed_current_kf;
-
-            std::pair<FrameCamId, FrameCamId> edge = *loop_edges.rbegin();
-            std::cout << "Frame " << edge.first.frame_id << " and Frame "
-                      << edge.second.frame_id << std::endl;
-
-            std::cout << "The computed Sim(3) is: " << std::endl;
-            std::cout << sim3.rotationMatrix() << std::endl;
-
-            std::cout << sim3.translation() << std::endl;
-            loop_closure(edge.first, current_cam_left, edge.second, T_0_1, sim3,
-                         cameras, landmarks, num_ess_threshold,
-                         loop_closure_options);
           }
         }
       }
@@ -1622,4 +1630,30 @@ double align_svd() {
   }
   double error = alignSVD(est_t_ns, est_t_w_i, gt_t_ns, gt_t_w_i);
   return error;
+}
+
+void global_ba() {
+  FrameId fid = *(kf_frames.begin());
+  std::cout << "fid " << fid << std::endl;
+
+  // Prepare bundle adjustment
+  GlobalBundleAdjustmentOptions ba_options;
+  // ba_options.optimize_intrinsics = ba_optimize_intrinsics;
+  ba_options.use_huber = true;
+  ba_options.huber_parameter = reprojection_error_huber_pixel;
+  ba_options.max_num_iterations = 20;
+  ba_options.verbosity_level = ba_verbose;
+
+  // calib_cam_opt = calib_cam;
+  // cameras_opt = cameras;
+  // landmarks_opt = landmarks;
+
+  // opt_running = true;
+
+  // opt_thread.reset(new std::thread([fid, ba_options] {
+  // std::set<FrameCamId> fixed_cameras = {{fid, 0}, {fid, 1}};
+  std::set<FrameCamId> fixed_cameras = {{0, 0}, {0, 1}};
+
+  global_bundle_adjustment(feature_corners, ba_options, fixed_cameras,
+                           calib_cam, cameras, landmarks);
 }
