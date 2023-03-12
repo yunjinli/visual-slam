@@ -309,7 +309,7 @@ int main(int argc, char** argv) {
   // std::string dataset_path = "../data/V1_01_easy/mav0/";
   std::string dataset_path = "../data/euro_data/MH_04_difficult/mav0/";
   // std::string cam_calib = "../opt_calib.json";
-  std::string cam_calib = "../euroc_ds_calib_visnav_type.json";
+  std::string cam_calib = "../calibration_file/euroc_mh12345_ds_calib.json";
   std::string voc_path = "../Vocabulary/ORBvoc.txt";
   CLI::App app{"Visual odometry."};
 
