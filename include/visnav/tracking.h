@@ -40,7 +40,20 @@
 #include <opengv/triangulation/methods.hpp>
 #include <set>
 namespace visnav {
-
+/// @brief Track the current camera location
+/// @param[in] current_pose The last camera pose
+/// @param[in] cam The camera model
+/// @param[in] kdl Keypoint of the current left camera
+/// @param[in] landmarks All the landmarks in the map
+/// @param[in] reprojection_error_pnp_inlier_threshold_pixel Threshold for
+/// RANSAC
+/// @param[out] md Matched landmarks in the current map
+/// @param[in] vel The velocity prediction -> check if prediction obey motion
+/// model
+/// @param[in] motion_threshold Threshold for the motion model
+/// @param[in] last_tracking_successful The flag inform us if the last tracking
+/// is successful
+/// @return If the current tracking is successful
 bool track_camera(const Sophus::SE3d& current_pose,
                   const std::shared_ptr<AbstractCamera<double>>& cam,
                   const KeypointsData& kdl, const Landmarks& landmarks,
@@ -146,7 +159,13 @@ bool track_camera(const Sophus::SE3d& current_pose,
   }
   return solution_found;
 }
-
+/// @brief Using Bag-of-word to search reference keyframe for relocalization
+/// @param[in] voc Bag-of-word vocabulary
+/// @param[in] recognition_database Bag-of-word database
+/// @param[in] bow_vector Bad-of-word vector of current camera
+/// @param[in] keyframes Collection of keyframes
+/// @param[out] candidate_kf_fcids Candidate keyframe for relocalization
+/// @return if relocalization candidate is found
 bool detect_relocalization_candidate(
     const ORBVocabulary* voc, const DBoWInvertedFile& recognition_database,
     const DBoW2::BowVector& bow_vector, const Cameras& keyframes,
@@ -200,7 +219,25 @@ bool detect_relocalization_candidate(
   }
   return true;
 }
-
+/// @brief Relocalize the camera
+/// @param[in] fcid Current `FrameCamId`
+/// @param[in] img_path Current image file path
+/// @param[in] calib_cam Calibration file
+/// @param[in] orb OpenCv object for creating BoW vector
+/// @param[in] voc Bag-of-word vocabulary
+/// @param[in] recognition_database Bag-of-word database
+/// @param[in] keyframes Collection of keyframes
+/// @param[in] vel The velocity prediction -> check if prediction obey motion
+/// model
+/// @param[in] current_pose The last camera pose
+/// @param[in] feature_corners Keypoints collection for all existing keyframes
+/// @param[in] landmarks Current map
+/// @param[in] motion_threshold Threshold for the motion model
+/// @param[in] reprojection_error_pnp_inlier_threshold_pixel Threshold for
+/// RANSAC
+/// @param[out] lm_match_data Output landmark matched data by the BoW candidate
+/// frame's landmarks
+/// @return If the relocalization is successful
 bool relocalize_camera(const FrameCamId& fcid, const std::string& img_path,
                        const Calibration& calib_cam, cv::Ptr<cv::ORB> orb,
                        const ORBVocabulary* voc,
