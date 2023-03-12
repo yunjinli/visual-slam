@@ -242,10 +242,10 @@ bool relocalize_camera(const FrameCamId& fcid, const std::string& img_path,
                        const Calibration& calib_cam, cv::Ptr<cv::ORB> orb,
                        const CovisibilityGraph& graph, const ORBVocabulary* voc,
                        const DBoWInvertedFile& recognition_database,
-                       const Cameras& keyframes, Sophus::SE3d vel,
+                       const Cameras& keyframes, const Sophus::SE3d vel,
                        const Sophus::SE3d& current_pose,
-                       const Corners& feature_corners, Landmarks& landmarks,
-                       double motion_threshold,
+                       const Corners& feature_corners,
+                       const Landmarks& landmarks, double motion_threshold,
                        double reprojection_error_pnp_inlier_threshold_pixel,
                        LandmarkMatchData& lm_match_data) {
   std::cout << std::endl;

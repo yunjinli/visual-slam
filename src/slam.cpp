@@ -1249,12 +1249,12 @@ bool next_step() {
     //   deactive_cameras[removed_fcid] = removed_camera;
     // }
 
+    optimize();
     // Ducument the removed keyframe
     if (pose_graph_opt_done) {
       // Perform global BA
       global_ba();
     } else {
-      optimize();
     }
 
     current_pose = cameras[fcidl].T_w_c;
@@ -1340,7 +1340,7 @@ bool next_step() {
     //     (double)(feature_corners.at(recent_kf_fcid).corner_descriptors.size());
 
     if (int(md.inliers.size()) < new_kf_min_inliers && !opt_running &&
-        !opt_finished && !global_ba_running && !global_ba_finished) {
+        !opt_finished) {
       take_keyframe = true;
     }
 
@@ -1348,6 +1348,7 @@ bool next_step() {
       opt_thread->join();
       for (const auto& kv : landmarks_opt) {
         landmarks.at(kv.first) = kv.second;
+        landmarks.at(kv.first).modified = true;
         if (cameras_opt.count(landmarks.at(kv.first).from_fcid)) {
           landmarks.at(kv.first).p_c =
               cameras_opt.at(landmarks.at(kv.first).from_fcid).T_w_c.inverse() *
@@ -1368,6 +1369,7 @@ bool next_step() {
         }
         cameras.at(kv.first) = kv.second;
         cameras.at(kv.first).covisible_rel_poses = updated_covisible_rel_poses;
+        cameras.at(kv.first).modified = true;
       }
       calib_cam = calib_cam_opt;
       opt_finished = false;
@@ -1375,30 +1377,40 @@ bool next_step() {
 
     if (!global_ba_running && global_ba_finished) {
       global_ba_thread->join();
-      for (const auto& kv : landmarks_opt) {
-        landmarks.at(kv.first) = kv.second;
-        if (cameras_opt.count(landmarks.at(kv.first).from_fcid)) {
-          landmarks.at(kv.first).p_c =
-              cameras_opt.at(landmarks.at(kv.first).from_fcid).T_w_c.inverse() *
-              landmarks.at(kv.first).p;
+      for (const auto& kv : landmarks_gba) {
+        if (!landmarks.at(kv.first).modified) {
+          landmarks.at(kv.first) = kv.second;
+          if (cameras_opt.count(landmarks.at(kv.first).from_fcid)) {
+            landmarks.at(kv.first).p_c =
+                cameras_opt.at(landmarks.at(kv.first).from_fcid)
+                    .T_w_c.inverse() *
+                landmarks.at(kv.first).p;
+          } else {
+            landmarks.at(kv.first).p_c =
+                cameras.at(landmarks.at(kv.first).from_fcid).T_w_c.inverse() *
+                landmarks.at(kv.first).p;
+          }
         } else {
-          landmarks.at(kv.first).p_c =
-              cameras.at(landmarks.at(kv.first).from_fcid).T_w_c.inverse() *
-              landmarks.at(kv.first).p;
+          landmarks.at(kv.first).modified = false;
         }
       }
-      for (const auto& kv : cameras_opt) {
-        // update the relative poses
-        std::map<FrameCamId, Sophus::SE3d> updated_covisible_rel_poses;
-        for (const auto& fcid_rel : kv.second.covisible_rel_poses) {
-          updated_covisible_rel_poses.emplace(std::make_pair(
-              fcid_rel.first,
-              kv.second.T_w_c.inverse() * cameras.at(fcid_rel.first).T_w_c));
+      for (const auto& kv : cameras_gba) {
+        if (!cameras.at(kv.first).modified) {
+          // update the relative poses
+          std::map<FrameCamId, Sophus::SE3d> updated_covisible_rel_poses;
+          for (const auto& fcid_rel : kv.second.covisible_rel_poses) {
+            updated_covisible_rel_poses.emplace(std::make_pair(
+                fcid_rel.first,
+                kv.second.T_w_c.inverse() * cameras.at(fcid_rel.first).T_w_c));
+          }
+          cameras.at(kv.first) = kv.second;
+          cameras.at(kv.first).covisible_rel_poses =
+              updated_covisible_rel_poses;
+        } else {
+          cameras.at(kv.first).modified = false;
         }
-        cameras.at(kv.first) = kv.second;
-        cameras.at(kv.first).covisible_rel_poses = updated_covisible_rel_poses;
       }
-      calib_cam = calib_cam_opt;
+      calib_cam = calib_cam_gba;
       global_ba_finished = false;
     }
 
@@ -1696,8 +1708,9 @@ void global_ba_offline() {
 }
 void global_ba() {
   pose_graph_opt_done = false;
-  cameras_opt.clear();
-  landmarks_opt.clear();
+  cameras_gba.clear();
+  landmarks_gba.clear();
+
   size_t num_obs = 0;
   size_t num_lm = 0;
   for (const auto& kv : landmarks) {
@@ -1705,21 +1718,18 @@ void global_ba() {
     num_lm += 1;
     TrackId tid = kv.first;
     Landmark lm = kv.second;
-    landmarks_opt.emplace(std::make_pair(tid, lm));
+    landmarks_gba.emplace(std::make_pair(tid, lm));
   }
   size_t num_cam = 0;
   for (const auto& kv : cameras) {
     num_cam += 1;
     FrameCamId fcid = kv.first;
     Camera cam = kv.second;
-    cameras_opt.emplace(std::make_pair(fcid, cam));
+    cameras_gba.emplace(std::make_pair(fcid, cam));
   }
 
   std::cerr << "Optimizing map with " << num_cam << " cameras, " << num_lm
             << " points and " << num_obs << " observations." << std::endl;
-
-  FrameId fid = *(kf_frames.begin());
-  std::cout << "fid " << fid << std::endl;
 
   // Prepare bundle adjustment
   GlobalBundleAdjustmentOptions ba_options;
@@ -1729,17 +1739,17 @@ void global_ba() {
   ba_options.max_num_iterations = 20;
   ba_options.verbosity_level = ba_verbose;
 
-  calib_cam_opt = calib_cam;
+  calib_cam_gba = calib_cam;
   // cameras_opt = cameras;
   // landmarks_opt = landmarks;
 
   global_ba_running = true;
-
+  FrameId fid = 0;
   global_ba_thread.reset(new std::thread([fid, ba_options] {
     std::set<FrameCamId> fixed_cameras = {{0, 0}, {0, 1}};
 
     global_bundle_adjustment(feature_corners, ba_options, fixed_cameras,
-                             calib_cam_opt, cameras_opt, landmarks_opt);
+                             calib_cam_gba, cameras_gba, landmarks_gba);
 
     global_ba_finished = true;
     global_ba_running = false;
