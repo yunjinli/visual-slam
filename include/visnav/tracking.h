@@ -47,6 +47,9 @@ bool track_camera(const Sophus::SE3d& current_pose,
                   const double reprojection_error_pnp_inlier_threshold_pixel,
                   LandmarkMatchData& md, const Sophus::SE3d& vel,
                   double motion_threshold, bool last_tracking_successful) {
+  std::cout << std::endl;
+  std::cout << "========== TRACKING ==========" << std::endl;
+  std::cout << std::endl;
   md.inliers.clear();
 
   // predict the pose based on constant motion model
@@ -197,19 +200,27 @@ bool detect_relocalization_candidate(
   }
   return true;
 }
+
 bool relocalize_camera(const FrameCamId& fcid, const std::string& img_path,
                        const Calibration& calib_cam, cv::Ptr<cv::ORB> orb,
                        const ORBVocabulary* voc,
                        const DBoWInvertedFile& recognition_database,
                        const Cameras& keyframes, Sophus::SE3d vel,
                        const Sophus::SE3d& current_pose,
-                       double motion_threshold, Sophus::SE3d& reloc_pose) {
-  std::cout << "Relocalization begin..." << std::endl;
+                       const Corners& feature_corners, Landmarks& landmarks,
+                       double motion_threshold,
+                       double reprojection_error_pnp_inlier_threshold_pixel,
+                       LandmarkMatchData& lm_match_data) {
+  std::cout << std::endl;
+  std::cout << "========== RELOCALIZATION ==========" << std::endl;
+  std::cout << std::endl;
+  lm_match_data.matches.clear();
+  lm_match_data.inliers.clear();
   DBoW2::BowVector bow_vector;
   DBoW2::FeatureVector feature_vector;
   cv::Mat img = cv::imread(img_path);
-  Camera cam2;
-  cam2.img_path = img_path;
+  // Camera cam2;
+  // cam2.img_path = img_path;
   compute_bow_vector(img, orb, 1500, voc, bow_vector, feature_vector);
   std::vector<FrameCamId> reloc_fcids;
   bool reloc_pose_good = false;
@@ -217,77 +228,102 @@ bool relocalize_camera(const FrameCamId& fcid, const std::string& img_path,
                                       keyframes, reloc_fcids)) {
     std::cout << reloc_fcids.size() << " candidates found..." << std::endl;
     for (const auto& reloc_fcid : reloc_fcids) {
-      Sophus::SE3d sim3;
-      pangolin::ManagedImage<uint8_t> img1 =
-          pangolin::LoadImage(keyframes.at(reloc_fcid).img_path);
-      pangolin::ManagedImage<uint8_t> img2 = pangolin::LoadImage(cam2.img_path);
-      KeypointsData kd1;
-      KeypointsData kd2;
+      int total_iteration = 0;
+      int max_iteration = 5;
 
-      detectKeypointsAndDescriptors(img1, kd1, 1500, true);
-      detectKeypointsAndDescriptors(img2, kd2, 1500, true);
-      MatchData md;
-      matchDescriptors(kd1.corner_descriptors, kd2.corner_descriptors,
-                       md.matches, 70, 1.2);
-
-      opengv::bearingVectors_t bearingVectors1;
-      opengv::bearingVectors_t bearingVectors2;
-      for (const auto& match : md.matches) {
-        bearingVectors1.push_back(
-            calib_cam.intrinsics[reloc_fcid.cam_id]->unproject(
-                kd1.corners.at(match.first)));
-        bearingVectors2.push_back(calib_cam.intrinsics[fcid.cam_id]->unproject(
-            kd2.corners.at(match.second)));
-      }
-      // create the central relative adapter
-      opengv::relative_pose::CentralRelativeAdapter adapter(bearingVectors1,
-                                                            bearingVectors2);
-      // create a RANSAC object
-      opengv::sac::Ransac<
-          opengv::sac_problems::relative_pose::CentralRelativePoseSacProblem>
-          ransac;
-      // create a CentralRelativePoseSacProblem
-      // (set algorithm to STEWENIUS, NISTER, SEVENPT, or EIGHTPT)
-      std::shared_ptr<
-          opengv::sac_problems::relative_pose::CentralRelativePoseSacProblem>
-          relposeproblem_ptr(
-              new opengv::sac_problems::relative_pose::
-                  CentralRelativePoseSacProblem(
-                      adapter, opengv::sac_problems::relative_pose::
-                                   CentralRelativePoseSacProblem::NISTER));
-      // run ransac
-      ransac.sac_model_ = relposeproblem_ptr;
-      // ransac.threshold_ = threshold;
-      // ransac.max_iterations_ = maxIterations;
-      ransac.computeModel();
-      opengv::transformation_t best_transformation = ransac.model_coefficients_;
-
-      // Refinement using non-linear optimization
-      adapter.sett12(best_transformation.block(0, 3, 3, 1));
-      adapter.setR12(best_transformation.block(0, 0, 3, 3));
-      if (ransac.inliers_.size() < 15) {
-        reloc_pose_good = false;
-        continue;
-      } else {
+      while (!reloc_pose_good) {
         std::cout << "Current Frame ID: " << fcid.frame_id << std::endl;
         std::cout << "Reference Frame ID: " << reloc_fcid.frame_id << std::endl;
-        opengv::transformation_t nonlinear_transformation =
-            opengv::relative_pose::optimize_nonlinear(adapter, ransac.inliers_);
-        sim3 = Sophus::SE3<double>(nonlinear_transformation.block(0, 0, 3, 3),
-                                   nonlinear_transformation.block(0, 3, 3, 1));
-        reloc_pose = keyframes.at(reloc_fcid).T_w_c * sim3;
-        // Check if camera is poorly tracked
-        Sophus::Vector6d se3_vel = (current_pose.inverse() * reloc_pose).log();
+        Sophus::SE3d sim3;
+        const KeypointsData& kd1 = feature_corners.at(reloc_fcid);
+        const KeypointsData& kd2 = feature_corners.at(fcid);
+        MatchData md;
+        matchDescriptors(kd1.corner_descriptors, kd2.corner_descriptors,
+                         md.matches, 70, 1.2);
+        std::map<FeatureId, FeatureId> matches;
 
-        double err = (se3_vel - vel.log()).block(0, 0, 3, 1).cwiseAbs().sum();
-        std::cout << "The error is: " << err << std::endl;
-        if (err > motion_threshold) {
+        for (int i = 0; i < md.matches.size(); i++) {
+          matches.emplace(md.matches[i]);
+        }
+        opengv::points_t points;
+        opengv::bearingVectors_t bearingVectors;
+
+        for (const auto& kv : keyframes.at(reloc_fcid).map_points) {
+          if (matches.count(kv.second)) {
+            lm_match_data.matches.push_back(
+                std::make_pair(matches.at(kv.second), kv.first));
+            points.push_back(landmarks.at(kv.first).p);
+            bearingVectors.push_back(calib_cam.intrinsics[0]->unproject(
+                kd2.corners[matches.at(kv.second)]));
+          }
+        }
+        // create the central adapter
+        opengv::absolute_pose::CentralAbsoluteAdapter adapter(bearingVectors,
+                                                              points);
+        // create a Ransac object
+        opengv::sac::Ransac<
+            opengv::sac_problems::absolute_pose::AbsolutePoseSacProblem>
+            ransac;
+        // create an AbsolutePoseSacProblem
+        // (algorithm is selectable: KNEIP, GAO, or EPNP)
+        std::shared_ptr<
+            opengv::sac_problems::absolute_pose::AbsolutePoseSacProblem>
+            absposeproblem_ptr(
+                new opengv::sac_problems::absolute_pose::AbsolutePoseSacProblem(
+                    adapter, opengv::sac_problems::absolute_pose::
+                                 AbsolutePoseSacProblem::KNEIP));
+        // run ransac
+        ransac.sac_model_ = absposeproblem_ptr;
+        ransac.threshold_ =
+            1.0 -
+            cos(atan(reprojection_error_pnp_inlier_threshold_pixel / 500.0));
+        ransac.computeModel();
+        // get the result
+        opengv::transformation_t best_transformation =
+            ransac.model_coefficients_;
+
+        // Refinement using non-linear optimization
+        adapter.sett(best_transformation.block(0, 3, 3, 1));
+        adapter.setR(best_transformation.block(0, 0, 3, 3));
+        opengv::transformation_t nonlinear_transformation =
+            opengv::absolute_pose::optimize_nonlinear(adapter, ransac.inliers_);
+        lm_match_data.T_w_c =
+            Sophus::SE3<double>(nonlinear_transformation.block(0, 0, 3, 3),
+                                nonlinear_transformation.block(0, 3, 3, 1));
+        ransac.sac_model_->selectWithinDistance(
+            nonlinear_transformation, ransac.threshold_, ransac.inliers_);
+
+        if (ransac.inliers_.size() < 10) {
+          std::cout << "RELOCALIZATION FAIL...NOT ENOUGH INLIERS..."
+                    << std::endl;
+          total_iteration++;
           reloc_pose_good = false;
-          continue;
         } else {
-          reloc_pose_good = true;
+          Sophus::Vector6d se3_vel =
+              (current_pose.inverse() * lm_match_data.T_w_c).log();
+
+          double err = (se3_vel - vel.log()).block(0, 0, 3, 1).cwiseAbs().sum();
+          std::cout << "The error is: " << err << std::endl;
+          if (err > motion_threshold) {
+            std::cout << "RELOCALIZATION FAIL...VIOLATE MOTION MODEL..."
+                      << std::endl;
+            total_iteration++;
+            reloc_pose_good = false;
+          } else {
+            std::cout << "RELOCALIZATION SUCCESSFUL..." << std::endl;
+            reloc_pose_good = true;
+            for (const auto& idx : ransac.inliers_) {
+              lm_match_data.inliers.push_back(lm_match_data.matches[idx]);
+            }
+            break;
+          }
+        }
+        if (total_iteration > max_iteration) {
           break;
         }
+      }
+      if (reloc_pose_good) {
+        break;
       }
     }
   } else {

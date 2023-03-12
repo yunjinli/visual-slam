@@ -415,10 +415,19 @@ void landmark_fusion(const FrameCamId& cur_kf_fcid, Camera cur_kf,
                      const Sophus::SE3d& sim3, Cameras& keyframes,
                      Landmarks& landmarks) {}
 
+struct LoopClosureOptions {
+  /// 0: silent, 1: ceres brief report (one line), 2: ceres full report
+  int verbosity_level = 1;
+
+  /// set current keyframe fixed
+  bool set_current_kf_fixed = true;
+};
+
 void pose_graph_optimization(const FrameCamId& cur_kf_fcid, Camera& cur_kf,
                              const FrameCamId& loop_candidate_fcid,
                              const Sophus::SE3d& sim3, Cameras& keyframes,
-                             int essential_threshold) {
+                             int essential_threshold,
+                             const LoopClosureOptions& options) {
   ceres::Problem problem;
 
   for (auto& kv : keyframes) {
@@ -428,7 +437,10 @@ void pose_graph_optimization(const FrameCamId& cur_kf_fcid, Camera& cur_kf,
   }
   problem.AddParameterBlock(cur_kf.T_w_c.data(), Sophus::SE3d::num_parameters,
                             new Sophus::test::LocalParameterizationSE3);
-  problem.SetParameterBlockConstant(cur_kf.T_w_c.data());
+
+  if (options.set_current_kf_fixed) {
+    problem.SetParameterBlockConstant(cur_kf.T_w_c.data());
+  }
 
   FrameCamId fcid_now = cur_kf_fcid;
   if (cur_kf.covisible_weights.count(cur_kf.last_fcid)) {
@@ -584,12 +596,12 @@ void loop_closure(const FrameCamId& cur_kf_fcid, Camera cur_kf,
                   const FrameCamId& loop_candidate_fcid,
                   const Sophus::SE3d T_0_1, const Sophus::SE3d& sim3,
                   Cameras& keyframes, Landmarks& landmarks,
-                  int essential_threshold) {
+                  int essential_threshold, const LoopClosureOptions& options) {
   loop_align(cur_kf_fcid, cur_kf, loop_candidate_fcid, T_0_1, sim3, keyframes,
              landmarks);
   // landmark fustion
   pose_graph_optimization(cur_kf_fcid, cur_kf, loop_candidate_fcid, sim3,
-                          keyframes, essential_threshold);
+                          keyframes, essential_threshold, options);
   // update stereo pair
   update_stereo_pair(cur_kf_fcid, cur_kf, T_0_1, keyframes);
 

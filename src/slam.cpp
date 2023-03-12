@@ -175,7 +175,7 @@ std::vector<std::pair<FrameCamId, FrameCamId>> loop_edges;
 bool loop_detected = false;
 Sophus::SE3d sim3;
 Sophus::SE3d rel_trans;
-
+LoopClosureOptions loop_closure_options;
 /// For relocalization
 /// This is not really a velocity but rather
 /// a constraint that tells us if the localization
@@ -263,6 +263,7 @@ pangolin::Var<bool> show_loop_closing_edge("hidden.show_loop", true, true);
 pangolin::Var<int> loop_closing_time_threshold("hidden.loop_closing_time", 500,
                                                100, 3000);
 pangolin::Var<bool> use_sim3("hidden.use_sim3", true, true);
+pangolin::Var<bool> fixed_current_kf("hidden.fixed_current_kf", true, true);
 //////////////////////////////////////////////
 /// Adding cameras and landmarks options
 
@@ -1119,7 +1120,6 @@ bool next_step() {
                            md);
 
     std::cout << "KF Found " << md.matches.size() << " matches." << std::endl;
-
     // localize_camera(current_pose, calib_cam.intrinsics[0], kdl, landmarks,
     //                 reprojection_error_pnp_inlier_threshold_pixel, md);
     tracking_successful =
@@ -1127,13 +1127,14 @@ bool next_step() {
                      reprojection_error_pnp_inlier_threshold_pixel, md, vel,
                      motion_threshold, tracking_successful);
     if (!tracking_successful) {
-      Sophus::SE3d reloc_pose;
-      if (!relocalize_camera(fcidl, images[fcidl], calib_cam, orb, orb_voc,
-                             orb_db, cameras, vel, current_pose,
-                             motion_threshold, reloc_pose)) {
-        current_pose = md.T_w_c;
+      Sophus::SE3d tracking_result = md.T_w_c;
+      if (!relocalize_camera(
+              fcidl, images[fcidl], calib_cam, orb, orb_voc, orb_db, cameras,
+              vel, current_pose, feature_corners, landmarks, motion_threshold,
+              reprojection_error_pnp_inlier_threshold_pixel, md)) {
+        current_pose = tracking_result;
       } else {
-        current_pose = reloc_pose;
+        current_pose = md.T_w_c;
         tracking_successful = true;
       }
     } else {
@@ -1180,8 +1181,11 @@ bool next_step() {
             loop_edges.push_back(
                 std::make_pair(fcidl, enough_consistent_candidates[i]));
             if (!use_sim3) {
+              sim3.setRotationMatrix(Eigen::Matrix3d().setIdentity());
               sim3.translation() = Eigen::Vector3d(0, 0, 0);
             }
+            loop_closure_options.set_current_kf_fixed = fixed_current_kf;
+
             std::pair<FrameCamId, FrameCamId> edge = *loop_edges.rbegin();
             std::cout << "Frame " << edge.first.frame_id << " and Frame "
                       << edge.second.frame_id << std::endl;
@@ -1191,7 +1195,8 @@ bool next_step() {
 
             std::cout << sim3.translation() << std::endl;
             loop_closure(edge.first, current_cam_left, edge.second, T_0_1, sim3,
-                         cameras, landmarks, num_ess_threshold);
+                         cameras, landmarks, num_ess_threshold,
+                         loop_closure_options);
           }
         }
       }
@@ -1273,19 +1278,19 @@ bool next_step() {
 
     // localize_camera(current_pose, calib_cam.intrinsics[0], kdl, landmarks,
     //                 reprojection_error_pnp_inlier_threshold_pixel, md);
-
     tracking_successful =
         track_camera(current_pose, calib_cam.intrinsics[0], kdl, landmarks,
                      reprojection_error_pnp_inlier_threshold_pixel, md, vel,
                      motion_threshold, tracking_successful);
     if (!tracking_successful) {
-      Sophus::SE3d reloc_pose;
-      if (!relocalize_camera(fcidl, images[fcidl], calib_cam, orb, orb_voc,
-                             orb_db, cameras, vel, current_pose,
-                             motion_threshold, reloc_pose)) {
-        current_pose = md.T_w_c;
+      Sophus::SE3d tracking_result = md.T_w_c;
+      if (!relocalize_camera(
+              fcidl, images[fcidl], calib_cam, orb, orb_voc, orb_db, cameras,
+              vel, current_pose, feature_corners, landmarks, motion_threshold,
+              reprojection_error_pnp_inlier_threshold_pixel, md)) {
+        current_pose = tracking_result;
       } else {
-        current_pose = reloc_pose;
+        current_pose = md.T_w_c;
         tracking_successful = true;
       }
     } else {
