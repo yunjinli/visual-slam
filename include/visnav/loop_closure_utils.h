@@ -661,7 +661,14 @@ struct GlobalBundleAdjustmentOptions {
   /// maximum number of solver iterations
   int max_num_iterations = 20;
 };
-// Run bundle adjustment to optimize cameras, points, and optionally intrinsics
+/// @brief Run global bundle adjustment to optimize all cameras, all landmarks
+/// @param feature_corners Collection of all keypoint data in all keyframes
+/// @param options Global bundle adjustment options
+/// @param fixed_cameras In global bundle adjustment, we fixed the first
+/// keyframes
+/// @param calib_cam The camera model
+/// @param cameras Collection of keyframes
+/// @param landmarks All map points
 void global_bundle_adjustment(const Corners& feature_corners,
                               const GlobalBundleAdjustmentOptions& options,
                               const std::set<FrameCamId>& fixed_cameras,

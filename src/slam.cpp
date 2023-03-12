@@ -87,6 +87,15 @@ double alignSVD(
 double align_svd();
 void global_ba_offline();
 void global_ba();
+void save_map_file(
+    const std::string& map_path, const Cameras& cameras,
+    const Landmarks& landmarks,
+    const std::vector<Eigen::Vector3d,
+                      Eigen::aligned_allocator<Eigen::Vector3d>>& est_t_w_i,
+    const std::vector<Eigen::Vector3d,
+                      Eigen::aligned_allocator<Eigen::Vector3d>>& gt_t_w_i,
+    const double ATE);
+void save_map_clicked();
 // void correct_loop();
 ///////////////////////////////////////////////////////////////////////////////
 /// Constants
@@ -200,7 +209,9 @@ std::vector<Timestamp> gt_t_ns;
 std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d>>
     est_t_w_i;
 std::vector<Timestamp> est_t_ns;
+double ATE = 0;
 std::string dataset_type = "euroc";
+std::string map_name;
 ///////////////////////////////////////////////////////////////////////////////
 /// GUI parameters
 ///////////////////////////////////////////////////////////////////////////////
@@ -310,6 +321,8 @@ Button global_ba_btn("ui.global_ba", &global_ba_offline);
 
 Button alignSVD_btn("ui.align_svd", &align_svd);
 
+Button save_map_btn("ui.save_map", &save_map_clicked);
+
 // Button correct_loop_btn("ui.correct_loop", &correct_loop);
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -326,6 +339,7 @@ int main(int argc, char** argv) {
   // std::string cam_calib = "../opt_calib.json";
   std::string cam_calib = "../calibration_file/euroc_mh12345_ds_calib.json";
   std::string voc_path = "../Vocabulary/ORBvoc.txt";
+
   CLI::App app{"Visual odometry."};
 
   app.add_option("--show-gui", show_gui, "Show GUI");
@@ -334,7 +348,7 @@ int main(int argc, char** argv) {
   app.add_option("--cam-calib", cam_calib,
                  "Path to camera calibration. Default: " + cam_calib);
   app.add_option("--voc-path", voc_path, "Vocabulary path");
-
+  app.add_option("--map-name", map_name, "Saved map name");
   // orb = cv::ORB::create(num_features_per_image, 1.2, 8, 19, 0, 2,
   //                       cv::ORB::FAST_SCORE);
 
@@ -1685,8 +1699,8 @@ double align_svd() {
       est_t_ns.push_back(timestamps[kv.first.frame_id]);
     }
   }
-  double error = alignSVD(est_t_ns, est_t_w_i, gt_t_ns, gt_t_w_i);
-  return error;
+  ATE = alignSVD(est_t_ns, est_t_w_i, gt_t_ns, gt_t_w_i);
+  return ATE;
 }
 
 void global_ba_offline() {
@@ -1754,4 +1768,37 @@ void global_ba() {
     global_ba_finished = true;
     global_ba_running = false;
   }));
+}
+
+void save_map_file(
+    const std::string& map_path, const Cameras& cameras,
+    const Landmarks& landmarks,
+    const std::vector<Eigen::Vector3d,
+                      Eigen::aligned_allocator<Eigen::Vector3d>>& est_t_w_i,
+    const std::vector<Eigen::Vector3d,
+                      Eigen::aligned_allocator<Eigen::Vector3d>>& gt_t_w_i,
+    const double ATE) {
+  {
+    std::ofstream os(map_path, std::ios::binary);
+
+    if (os.is_open()) {
+      cereal::JSONOutputArchive archive(os);
+      archive(cameras);
+      archive(landmarks);
+      archive(est_t_w_i);
+      archive(gt_t_w_i);
+      archive(ATE);
+
+      std::cout << "Saved map as " << map_path << " (" << cameras.size()
+                << " cameras, " << landmarks.size() << " landmarks)"
+                << std::endl;
+    } else {
+      std::cout << "Failed to save map as " << map_path << std::endl;
+    }
+  }
+}
+
+void save_map_clicked() {
+  std::string map_path = map_name + ".json";
+  save_map_file(map_path, cameras, landmarks, est_t_w_i, gt_t_w_i, ATE);
 }

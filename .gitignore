@@ -13,6 +13,7 @@ data/euro_data/
 __pycache__
 .vscode/*
 Vocabulary/ORBvoc.txt
+video/*
 # !Vocabulary/ORBvoc.txt.tar.gz
 # unignored files
 
