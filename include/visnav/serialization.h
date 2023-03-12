@@ -194,7 +194,7 @@ void serialize(Archive& ar, Camera& c) {
 
 template <class Archive>
 void serialize(Archive& ar, Landmark& lm) {
-  ar(CEREAL_NVP(lm.p), CEREAL_NVP(lm.obs), CEREAL_NVP(lm.outlier_obs));
+  ar(CEREAL_NVP(lm.p));
 }
 
 template <class Archive>
