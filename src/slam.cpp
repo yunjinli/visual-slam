@@ -309,7 +309,7 @@ int main(int argc, char** argv) {
   // std::string dataset_path = "../data/V1_01_easy/mav0/";
   std::string dataset_path = "../data/euro_data/MH_04_difficult/mav0/";
   // std::string cam_calib = "../opt_calib.json";
-  std::string cam_calib = "../euroc_ds_calib_visnav_type.json";
+  std::string cam_calib = "../calibration_file/euroc_mh12345_ds_calib.json";
   std::string voc_path = "../Vocabulary/ORBvoc.txt";
   CLI::App app{"Visual odometry."};
 
@@ -1130,10 +1130,11 @@ bool next_step() {
                      motion_threshold, tracking_successful);
     if (!tracking_successful) {
       Sophus::SE3d tracking_result = md.T_w_c;
-      if (!relocalize_camera(
-              fcidl, images[fcidl], calib_cam, orb, orb_voc, orb_db, cameras,
-              vel, current_pose, feature_corners, landmarks, motion_threshold,
-              reprojection_error_pnp_inlier_threshold_pixel, md)) {
+      if (!relocalize_camera(fcidl, images[fcidl], calib_cam, orb, graph,
+                             orb_voc, orb_db, cameras, vel, current_pose,
+                             feature_corners, landmarks, motion_threshold,
+                             reprojection_error_pnp_inlier_threshold_pixel,
+                             md)) {
         current_pose = tracking_result;
       } else {
         current_pose = md.T_w_c;
@@ -1286,10 +1287,11 @@ bool next_step() {
                      motion_threshold, tracking_successful);
     if (!tracking_successful) {
       Sophus::SE3d tracking_result = md.T_w_c;
-      if (!relocalize_camera(
-              fcidl, images[fcidl], calib_cam, orb, orb_voc, orb_db, cameras,
-              vel, current_pose, feature_corners, landmarks, motion_threshold,
-              reprojection_error_pnp_inlier_threshold_pixel, md)) {
+      if (!relocalize_camera(fcidl, images[fcidl], calib_cam, orb, graph,
+                             orb_voc, orb_db, cameras, vel, current_pose,
+                             feature_corners, landmarks, motion_threshold,
+                             reprojection_error_pnp_inlier_threshold_pixel,
+                             md)) {
         current_pose = tracking_result;
       } else {
         current_pose = md.T_w_c;
