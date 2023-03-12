@@ -256,11 +256,13 @@ void add_new_landmarks(const FrameCamId fcidl, const FrameCamId fcidr,
     const TrackId t_id = kv.second;
     if (landmarks.count(t_id) > 0)  // landmark exists
     {
+      landmarks.at(t_id).modified = true;
       landmarks.at(t_id).obs.emplace(std::make_pair(fcidl, f_id));
       landmarks.at(t_id).all_obs.emplace(std::make_pair(fcidl, f_id));
       // Check if feature id also exist in stereo pair
       for (auto& inlier_pair : md_stereo.inliers) {
         if (inlier_pair.first == f_id) {
+          landmarks.at(t_id).modified = true;
           landmarks.at(t_id).obs.emplace(
               std::make_pair(fcidr, inlier_pair.second));
           landmarks.at(t_id).all_obs.emplace(
@@ -331,11 +333,13 @@ void remove_old_keyframes(const FrameCamId fcidl, const int max_num_kfs,
     std::set<FrameCamId> removed_cameras = {{kf_id, 0}, {kf_id, 1}};
     for (auto& fcid : removed_cameras) {
       // cameras.erase(fcid);
+      cameras.at(fcid).modified = true;
       cameras.at(fcid).active = false;
     }
     for (auto& tid_lm : landmarks) {
       for (auto& fcid : removed_cameras) {
         if (tid_lm.second.obs.count(fcid)) {
+          tid_lm.second.modified = true;
           tid_lm.second.obs.erase(fcid);
         }
       }
@@ -349,6 +353,7 @@ void remove_old_keyframes(const FrameCamId fcidl, const int max_num_kfs,
       // old_landmarks.emplace(std::make_pair(old_tid, old_lm));
       // removed_lm_id.push_back(tid_lm.first);
       //      landmarks.erase(tid_lm.first);
+      tid_lm.second.modified = true;
       tid_lm.second.active = false;
     } else {
       tid_lm.second.active = true;

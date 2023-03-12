@@ -215,6 +215,8 @@ struct Camera {
   // Associated landmarks with keypoins
   std::map<TrackId, FeatureId> map_points;
   std::string img_path;
+  // Flag to check if it's being modified
+  bool modified = false;
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 };
 
@@ -246,6 +248,8 @@ struct Landmark {
   /// If there's no keyframe observation,
   /// deactivate the landmark.
   bool active;
+  /// Flag to check if it's being modified
+  bool modified = false;
 };
 
 /// collection {imageId => Camera} for all cameras in the map
