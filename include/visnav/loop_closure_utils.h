@@ -101,8 +101,10 @@ void construct_visibility_graph(const FrameCamId& new_fcid,
  * @param new_kf Newly computed keyframe that will be added into `keyframes`
  * later
  * @param keyframes The collection of keyframes
+ * @param voc The bag-of-word vocabulary
  * @param threshold Threshold of the weight of the covisible edge
- * @return min_score The
+ * @return The minimum score among a given frame with its cosivible pair (weight
+ * > threshold (default: 30))
  */
 double compute_min_connected_covisible(const Camera& new_kf,
                                        const Cameras& keyframes,
@@ -125,14 +127,16 @@ double compute_min_connected_covisible(const Camera& new_kf,
 /**
  * Get possible loop candidates
  *
- * @param new_kf_fcid
+ * @param new_kf_fcid Newly computed keyframe `FrameCamId`
  * @param new_kf Newly computed keyframe that would be added into `keyframes`
  * later.
  * @param keyframes The collection of keyframes.
  * @param graph The covisibility graph
- * @param min_score
+ * @param min_score The minimum score of the given essential pair of a frame in
+ * the covisible graph
  * @param recognition_database The bag-of-word database for the collection of
  * keyframes
+ * @param voc The bag-of-word vocabulary
  */
 std::vector<FrameCamId> detect_loop_candidates(
     const FrameCamId& new_kf_fcid, const Camera& new_kf,
@@ -258,6 +262,17 @@ std::vector<FrameCamId> detect_loop_candidates(
   return loop_candidates;
 }  // namespace visnav
 
+/// @brief Insert a frame bag-of-word vector into the database
+/// @param new_kf_fcid Newly computed keyframe `FrameCamId`
+/// @param new_kf Newly computed keyframe
+/// @param recognition_database The bag-of-word database
+void insert_new_kf_to_db(const FrameCamId& new_kf_fcid, const Camera& new_kf,
+                         DBoWInvertedFile& recognition_database) {
+  for (DBoW2::BowVector::const_iterator vit = new_kf.bow_vector.begin(),
+                                        vend = new_kf.bow_vector.end();
+       vit != vend; vit++)
+    recognition_database[vit->first].push_back(new_kf_fcid);
+}
 /**
  * Detect possible loop closure
  *
@@ -267,6 +282,7 @@ std::vector<FrameCamId> detect_loop_candidates(
  * @param keyframes The collection of keyframes.
  * @param recognition_database The bag-of-word database for the collection of
  * keyframes
+ * @param voc The bag-of-word vocabulary
  * @param graph The covisibility graph
  * @param consistent_groups This constains set of frames of the possible loop
  * candidate frames
@@ -275,13 +291,6 @@ std::vector<FrameCamId> detect_loop_candidates(
  * @param num_consistency_threshold
  * @return return true if consistent loop candidate found
  */
-void insert_new_kf_to_db(const FrameCamId& new_kf_fcid, const Camera& new_kf,
-                         DBoWInvertedFile& recognition_database) {
-  for (DBoW2::BowVector::const_iterator vit = new_kf.bow_vector.begin(),
-                                        vend = new_kf.bow_vector.end();
-       vit != vend; vit++)
-    recognition_database[vit->first].push_back(new_kf_fcid);
-}
 bool detect_loop_closure(const FrameCamId& new_kf_fcid, const Camera& new_kf,
                          const Cameras& keyframes,
                          DBoWInvertedFile& recognition_database,
@@ -377,24 +386,19 @@ bool detect_loop_closure(const FrameCamId& new_kf_fcid, const Camera& new_kf,
   }
   return false;
 }
-
+/// @brief Align the current keyframe and all its neighbors in the covisible
+/// graph based on the Sim(3)
+/// @param cur_kf_fcid Current keyframe ID
+/// @param cur_kf Current keyframe
+/// @param loop_candidate_fcid The loop candidate keyframe ID
+/// @param T_0_1 The stereo camera constraint
+/// @param sim3 The similarity transformation
+/// @param keyframes The collection of keyframes
+/// @param landmarks The current map
 void loop_align(const FrameCamId& cur_kf_fcid, Camera cur_kf,
                 const FrameCamId& loop_candidate_fcid,
                 const Sophus::SE3d& T_0_1, const Sophus::SE3d& sim3,
                 Cameras& keyframes, Landmarks& landmarks) {
-  // std::set<FrameCamId> neighbor_frames = graph.at(loop_candidate_fcid);
-  // Sophus::SE3d transformation =
-  //     keyframes.at(loop_candidate_fcid).T_w_c.inverse() * cur_kf.T_w_c *
-  //     sim3;
-  // keyframes.at(loop_candidate_fcid).T_w_c =
-  //     keyframes.at(loop_candidate_fcid).T_w_c * transformation;
-  // for (auto it = neighbor_frames.begin(); it != neighbor_frames.end(); it++)
-  // {
-  //   keyframes.at(*it).T_w_c = keyframes.at(*it).T_w_c * transformation;
-  //   keyframes.at(FrameCamId(it->frame_id, 1)).T_w_c =
-  //       keyframes.at(FrameCamId(it->frame_id, 1)).T_w_c * transformation;
-  // }
-  // std::set<FrameCamId> neighbor_frames = graph.at(cur_kf_fcid);
   const std::map<FrameCamId, Sophus::SE3d>& neighbor_frames =
       cur_kf.covisible_rel_poses;
   Sophus::SE3d transformation =
@@ -410,11 +414,19 @@ void loop_align(const FrameCamId& cur_kf_fcid, Camera cur_kf,
   }
 }
 
+/// @brief Not implemented...
+/// @param cur_kf_fcid
+/// @param cur_kf
+/// @param loop_candidate_fcid
+/// @param sim3
+/// @param keyframes
+/// @param landmarks
 void landmark_fusion(const FrameCamId& cur_kf_fcid, Camera cur_kf,
                      const FrameCamId& loop_candidate_fcid,
                      const Sophus::SE3d& sim3, Cameras& keyframes,
                      Landmarks& landmarks) {}
 
+/// @brief Some options for pose graph optimization
 struct LoopClosureOptions {
   /// 0: silent, 1: ceres brief report (one line), 2: ceres full report
   int verbosity_level = 1;
@@ -423,6 +435,14 @@ struct LoopClosureOptions {
   bool set_current_kf_fixed = true;
 };
 
+/// @brief Pose graph optimization
+/// @param cur_kf_fcid Current keyframe ID
+/// @param cur_kf Current keyframe
+/// @param loop_candidate_fcid Loop candidate keyframe ID
+/// @param sim3 Similarity transformation
+/// @param keyframes Collection of keyframes
+/// @param essential_threshold The threshold for essential pair (default: 30)
+/// @param options The options for the pose graph optimization
 void pose_graph_optimization(const FrameCamId& cur_kf_fcid, Camera& cur_kf,
                              const FrameCamId& loop_candidate_fcid,
                              const Sophus::SE3d& sim3, Cameras& keyframes,
@@ -566,6 +586,11 @@ void pose_graph_optimization(const FrameCamId& cur_kf_fcid, Camera& cur_kf,
   std::cout << summary.BriefReport() << std::endl;
 }  // namespace visnav
 
+/// @brief Update the position of the right camera
+/// @param cur_kf_fcid Current keyframe ID
+/// @param cur_kf Current keyframe
+/// @param T_0_1 Stereo camera constraint
+/// @param keyframes Collection of keyframes
 void update_stereo_pair(const FrameCamId& cur_kf_fcid, Camera cur_kf,
                         const Sophus::SE3d T_0_1, Cameras& keyframes) {
   for (auto& kv : keyframes) {
@@ -575,7 +600,11 @@ void update_stereo_pair(const FrameCamId& cur_kf_fcid, Camera cur_kf,
     }
   }
 }
-
+/// @brief Update the landmark positions
+/// @param cur_kf_fcid Current keyframe ID
+/// @param cur_kf Current keyframe
+/// @param keyframes Collection of keyframes
+/// @param landmarks The current map
 void update_landmark_position(const FrameCamId& cur_kf_fcid,
                               const Camera& cur_kf, const Cameras& keyframes,
                               Landmarks& landmarks) {
@@ -592,6 +621,16 @@ void update_landmark_position(const FrameCamId& cur_kf_fcid,
   }
 }
 
+/// @brief Perform loop closure
+/// @param cur_kf_fcid Current keyframe ID
+/// @param cur_kf Current keyframe
+/// @param loop_candidate_fcid Loop candidate keyframe ID
+/// @param T_0_1 Stereo camera constraint
+/// @param sim3 Similarity transformation
+/// @param keyframes Collection of keyframes
+/// @param landmarks The current map
+/// @param essential_threshold The threshold for essential pair (default: 30)
+/// @param options The options for pose graph optimization
 void loop_closure(const FrameCamId& cur_kf_fcid, Camera cur_kf,
                   const FrameCamId& loop_candidate_fcid,
                   const Sophus::SE3d T_0_1, const Sophus::SE3d& sim3,
