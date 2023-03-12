@@ -1130,10 +1130,11 @@ bool next_step() {
                      motion_threshold, tracking_successful);
     if (!tracking_successful) {
       Sophus::SE3d tracking_result = md.T_w_c;
-      if (!relocalize_camera(
-              fcidl, images[fcidl], calib_cam, orb, orb_voc, orb_db, cameras,
-              vel, current_pose, feature_corners, landmarks, motion_threshold,
-              reprojection_error_pnp_inlier_threshold_pixel, md)) {
+      if (!relocalize_camera(fcidl, images[fcidl], calib_cam, orb, graph,
+                             orb_voc, orb_db, cameras, vel, current_pose,
+                             feature_corners, landmarks, motion_threshold,
+                             reprojection_error_pnp_inlier_threshold_pixel,
+                             md)) {
         current_pose = tracking_result;
       } else {
         current_pose = md.T_w_c;
@@ -1286,10 +1287,11 @@ bool next_step() {
                      motion_threshold, tracking_successful);
     if (!tracking_successful) {
       Sophus::SE3d tracking_result = md.T_w_c;
-      if (!relocalize_camera(
-              fcidl, images[fcidl], calib_cam, orb, orb_voc, orb_db, cameras,
-              vel, current_pose, feature_corners, landmarks, motion_threshold,
-              reprojection_error_pnp_inlier_threshold_pixel, md)) {
+      if (!relocalize_camera(fcidl, images[fcidl], calib_cam, orb, graph,
+                             orb_voc, orb_db, cameras, vel, current_pose,
+                             feature_corners, landmarks, motion_threshold,
+                             reprojection_error_pnp_inlier_threshold_pixel,
+                             md)) {
         current_pose = tracking_result;
       } else {
         current_pose = md.T_w_c;

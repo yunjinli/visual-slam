@@ -268,35 +268,80 @@ bool relocalize_camera(const FrameCamId& fcid, const std::string& img_path,
       int total_iteration = 0;
       int max_iteration = 5;
 
+      const std::set<FrameCamId>& candidates = graph.at(reloc_fcid);
+
       while (!reloc_pose_good) {
         std::cout << "Current Frame ID: " << fcid.frame_id << std::endl;
         std::cout << "Reference Frame ID: " << reloc_fcid.frame_id << std::endl;
         Sophus::SE3d sim3;
-        const KeypointsData& kd1 = feature_corners.at(reloc_fcid);
-        const KeypointsData& kd2 = feature_corners.at(fcid);
-        MatchData md;
-        matchDescriptors(kd1.corner_descriptors, kd2.corner_descriptors,
-                         md.matches, 70, 1.2);
-        std::map<FeatureId, FeatureId> matches;
 
+        MatchData md;
+        std::map<FeatureId, FeatureId> matches;
+        // We first check the correspondence with the loop candidate
+        matches.clear();
+        md.matches.clear();
+        matchDescriptors(feature_corners.at(reloc_fcid).corner_descriptors,
+                         feature_corners.at(fcid).corner_descriptors,
+                         md.matches, 70, 1.2);
+        // put matches to a hash map for better lookup
         for (int i = 0; i < md.matches.size(); i++) {
           matches.emplace(md.matches[i]);
         }
         opengv::points_t points;
         opengv::bearingVectors_t bearingVectors;
+        std::set<TrackId> already_added_landmarks;
+        std::set<FeatureId> already_added_features;
 
         for (const auto& kv : keyframes.at(reloc_fcid).map_points) {
           if (matches.count(kv.second)) {
-            lm_match_data.matches.push_back(
-                std::make_pair(matches.at(kv.second), kv.first));
-            points.push_back(landmarks.at(kv.first).p);
-            bearingVectors.push_back(calib_cam.intrinsics[0]->unproject(
-                kd2.corners[matches.at(kv.second)]));
+            if (!already_added_landmarks.count(kv.first) &&
+                !already_added_features.count(matches.at(kv.second))) {
+              lm_match_data.matches.push_back(
+                  std::make_pair(matches.at(kv.second), kv.first));
+              points.push_back(landmarks.at(kv.first).p);
+              bearingVectors.push_back(calib_cam.intrinsics[0]->unproject(
+                  feature_corners.at(fcid).corners[matches.at(kv.second)]));
+              already_added_landmarks.insert(kv.first);
+              already_added_features.insert(matches.at(kv.second));
+            }
+          }
+        }
+        for (auto it = candidates.begin(); it != candidates.end(); it++) {
+          if (*it == fcid) {
+            continue;
+          }
+          matches.clear();
+          md.matches.clear();
+
+          // Note that we put candidata keypoints in the front
+          matchDescriptors(feature_corners.at(*it).corner_descriptors,
+                           feature_corners.at(fcid).corner_descriptors,
+                           md.matches, 70, 1.2);
+
+          // put matches to a hash map for better lookup
+          for (int i = 0; i < md.matches.size(); i++) {
+            matches.emplace(md.matches[i]);
+          }
+
+          for (const auto& kv : keyframes.at(*it).map_points) {
+            if (matches.count(kv.second)) {
+              if (!already_added_landmarks.count(kv.first) &&
+                  !already_added_features.count(matches.at(kv.second))) {
+                points.push_back(landmarks.at(kv.first).p);
+                bearingVectors.push_back(calib_cam.intrinsics[0]->unproject(
+                    feature_corners.at(fcid).corners[matches.at(kv.second)]));
+                already_added_landmarks.insert(kv.first);
+                already_added_features.insert(matches.at(kv.second));
+              }
+            }
           }
         }
         if (points.size() < 5 || bearingVectors.size() < 5) {
           std::cout << "RELOCALIZATION FAIL...NOT ENOUGH CORRESPONDENCE...";
-          break;
+          return false;
+        } else {
+          std::cout
+              << "RELOCALIZATION CONTINUE...ENOUGH CORRESPONDENCE FOUND...";
         }
         // create the central adapter
         opengv::absolute_pose::CentralAbsoluteAdapter adapter(bearingVectors,
