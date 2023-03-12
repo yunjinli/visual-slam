@@ -294,6 +294,10 @@ bool relocalize_camera(const FrameCamId& fcid, const std::string& img_path,
                 kd2.corners[matches.at(kv.second)]));
           }
         }
+        if (points.size() < 5 || bearingVectors.size() < 5) {
+          std::cout << "RELOCALIZATION FAIL...NOT ENOUGH CORRESPONDENCE...";
+          break;
+        }
         // create the central adapter
         opengv::absolute_pose::CentralAbsoluteAdapter adapter(bearingVectors,
                                                               points);
