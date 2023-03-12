@@ -239,6 +239,12 @@ pangolin::Var<bool> show_outlier_observations("ui.show_outlier_obs", false,
                                               true);
 pangolin::Var<bool> follow_frame("ui.follow_frame", false, true);
 pangolin::Var<bool> show_ids("ui.show_ids", false, true);
+
+// For Loop Closing
+pangolin::Var<bool> enable_loop_closure("ui.loop_closure", true, true);
+pangolin::Var<bool> enable_global_ba_after_loop_closure("ui.GBA_after", true,
+                                                        true);
+pangolin::Var<bool> enable_relocalization("ui.relocalization", true, true);
 pangolin::Var<bool> show_epipolar("hidden.show_epipolar", false, true);
 pangolin::Var<bool> show_cameras3d("hidden.show_cameras", true, true);
 pangolin::Var<bool> show_points3d("hidden.show_points", true, true);
@@ -280,9 +286,6 @@ pangolin::Var<bool> show_essential("hidden.show_essential", false, true);
 pangolin::Var<bool> show_spanning_tree("hidden.show_spanning_tree", true, true);
 
 // For Loop Closing
-pangolin::Var<bool> enable_loop_closure("hidden.loop_closure", true, true);
-pangolin::Var<bool> enable_global_ba_after_loop_closure("hidden.GBA_after",
-                                                        false, true);
 pangolin::Var<int> num_consistency("hidden.num_consistency", 3, 1, 15);
 pangolin::Var<bool> show_loop_closing_edge("hidden.show_loop", true, true);
 pangolin::Var<int> loop_closing_time_threshold("hidden.loop_closing_time", 500,
@@ -316,7 +319,7 @@ using Button = pangolin::Var<std::function<void(void)>>;
 
 Button next_step_btn("ui.next_step", &next_step);
 
-Button global_ba_btn("ui.global_ba", &global_ba_offline);
+Button global_ba_btn("ui.offline_global_ba", &global_ba_offline);
 // Button print_sim3_btn("ui.print_sim3", &print_sim3);
 
 Button alignSVD_btn("ui.align_svd", &align_svd);
@@ -1093,10 +1096,18 @@ bool next_step() {
     std::vector<Eigen::Vector2d, Eigen::aligned_allocator<Eigen::Vector2d>>
         projected_points;
     std::vector<TrackId> projected_track_ids;
-
-    if (tracking_successful) {
-      project_landmarks(current_pose * vel, calib_cam.intrinsics[0], landmarks,
-                        cam_z_threshold, projected_points, projected_track_ids);
+    if (enable_relocalization) {
+      // When enable relocalization,
+      // we introduce motion model for guided search
+      if (tracking_successful) {
+        project_landmarks(current_pose * vel, calib_cam.intrinsics[0],
+                          landmarks, cam_z_threshold, projected_points,
+                          projected_track_ids);
+      } else {
+        project_landmarks(current_pose, calib_cam.intrinsics[0], landmarks,
+                          cam_z_threshold, projected_points,
+                          projected_track_ids);
+      }
     } else {
       project_landmarks(current_pose, calib_cam.intrinsics[0], landmarks,
                         cam_z_threshold, projected_points, projected_track_ids);
@@ -1153,23 +1164,29 @@ bool next_step() {
     std::cout << "KF Found " << md.matches.size() << " matches." << std::endl;
     // localize_camera(current_pose, calib_cam.intrinsics[0], kdl, landmarks,
     //                 reprojection_error_pnp_inlier_threshold_pixel, md);
-    tracking_successful =
-        track_camera(current_pose, calib_cam.intrinsics[0], kdl, landmarks,
-                     reprojection_error_pnp_inlier_threshold_pixel, md, vel,
-                     motion_threshold, tracking_successful);
-    if (!tracking_successful) {
-      Sophus::SE3d tracking_result = md.T_w_c;
-      if (!relocalize_camera(fcidl, images[fcidl], calib_cam, orb, graph,
-                             orb_voc, orb_db, cameras, vel, current_pose,
-                             feature_corners, landmarks, motion_threshold,
-                             reprojection_error_pnp_inlier_threshold_pixel,
-                             md)) {
-        current_pose = tracking_result;
+    if (enable_relocalization) {
+      tracking_successful =
+          track_camera(current_pose, calib_cam.intrinsics[0], kdl, landmarks,
+                       reprojection_error_pnp_inlier_threshold_pixel, md, vel,
+                       motion_threshold, tracking_successful);
+      if (!tracking_successful) {
+        Sophus::SE3d tracking_result = md.T_w_c;
+        if (!relocalize_camera(fcidl, images[fcidl], calib_cam, orb, graph,
+                               orb_voc, orb_db, cameras, vel, current_pose,
+                               feature_corners, landmarks, motion_threshold,
+                               reprojection_error_pnp_inlier_threshold_pixel,
+                               md)) {
+          current_pose = tracking_result;
+        } else {
+          current_pose = md.T_w_c;
+          tracking_successful = true;
+        }
       } else {
         current_pose = md.T_w_c;
-        tracking_successful = true;
       }
     } else {
+      localize_camera(current_pose, calib_cam.intrinsics[0], kdl, landmarks,
+                      reprojection_error_pnp_inlier_threshold_pixel, md);
       current_pose = md.T_w_c;
     }
 
@@ -1289,9 +1306,16 @@ bool next_step() {
     std::vector<Eigen::Vector2d, Eigen::aligned_allocator<Eigen::Vector2d>>
         projected_points;
     std::vector<TrackId> projected_track_ids;
-    if (tracking_successful) {
-      project_landmarks(current_pose * vel, calib_cam.intrinsics[0], landmarks,
-                        cam_z_threshold, projected_points, projected_track_ids);
+    if (enable_relocalization) {
+      if (tracking_successful) {
+        project_landmarks(current_pose * vel, calib_cam.intrinsics[0],
+                          landmarks, cam_z_threshold, projected_points,
+                          projected_track_ids);
+      } else {
+        project_landmarks(current_pose, calib_cam.intrinsics[0], landmarks,
+                          cam_z_threshold, projected_points,
+                          projected_track_ids);
+      }
     } else {
       project_landmarks(current_pose, calib_cam.intrinsics[0], landmarks,
                         cam_z_threshold, projected_points, projected_track_ids);
@@ -1321,37 +1345,31 @@ bool next_step() {
 
     // localize_camera(current_pose, calib_cam.intrinsics[0], kdl, landmarks,
     //                 reprojection_error_pnp_inlier_threshold_pixel, md);
-    tracking_successful =
-        track_camera(current_pose, calib_cam.intrinsics[0], kdl, landmarks,
-                     reprojection_error_pnp_inlier_threshold_pixel, md, vel,
-                     motion_threshold, tracking_successful);
-    if (!tracking_successful) {
-      Sophus::SE3d tracking_result = md.T_w_c;
-      if (!relocalize_camera(fcidl, images[fcidl], calib_cam, orb, graph,
-                             orb_voc, orb_db, cameras, vel, current_pose,
-                             feature_corners, landmarks, motion_threshold,
-                             reprojection_error_pnp_inlier_threshold_pixel,
-                             md)) {
-        current_pose = tracking_result;
+    if (enable_relocalization) {
+      tracking_successful =
+          track_camera(current_pose, calib_cam.intrinsics[0], kdl, landmarks,
+                       reprojection_error_pnp_inlier_threshold_pixel, md, vel,
+                       motion_threshold, tracking_successful);
+      if (!tracking_successful) {
+        Sophus::SE3d tracking_result = md.T_w_c;
+        if (!relocalize_camera(fcidl, images[fcidl], calib_cam, orb, graph,
+                               orb_voc, orb_db, cameras, vel, current_pose,
+                               feature_corners, landmarks, motion_threshold,
+                               reprojection_error_pnp_inlier_threshold_pixel,
+                               md)) {
+          current_pose = tracking_result;
+        } else {
+          current_pose = md.T_w_c;
+          tracking_successful = true;
+        }
       } else {
         current_pose = md.T_w_c;
-        tracking_successful = true;
       }
     } else {
+      localize_camera(current_pose, calib_cam.intrinsics[0], kdl, landmarks,
+                      reprojection_error_pnp_inlier_threshold_pixel, md);
       current_pose = md.T_w_c;
     }
-
-    // Compute the number of newly observed features with the most recently
-    // selected keyframe
-    // const auto& recent_kf_fcid = cameras.rbegin()->first;
-    // MatchData md_most_recent_kf;
-    // matchDescriptors(kdl.corner_descriptors,
-    //                  feature_corners.at(recent_kf_fcid).corner_descriptors,
-    //                  md_most_recent_kf.matches, feature_match_max_dist,
-    //                  feature_match_test_next_best);
-    // double overlapping_fraction =
-    //     (double)(md_most_recent_kf.matches.size()) /
-    //     (double)(feature_corners.at(recent_kf_fcid).corner_descriptors.size());
 
     if (int(md.inliers.size()) < new_kf_min_inliers && !opt_running &&
         !opt_finished) {
