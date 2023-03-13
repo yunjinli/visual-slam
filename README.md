@@ -1,4 +1,4 @@
-# Visual SLAM
+# Visual-SLAM: Loop Closure and Relocalization
 
 ## Introduction
 
@@ -60,7 +60,7 @@ python load_map.py ../saved_maps/<map_file_path>.json
 | ------------------------------------------------ | ------------------------------------------------------ |
 | ![V1_1_easy_3d](/picture/V1_1_easy_3d.png)       | ![V1_2_medium_3d](/picture/V1_2_medium_3d.png)         |
 | ![V1_1_easy](/picture/V1_1_easy.png)             | ![V1_2_medium](/picture/V1_2_medium.png)               |
-| EuRoC Machine Hall 3 (MH_03_medium)              | EuRoC Machine Hall 4 (MH_04_difficult)                 |
+| **EuRoC Machine Hall 3 (MH_03_medium)**          | **EuRoC Machine Hall 4 (MH_04_difficult)**             |
 | ![MH_03_medium_3d](/picture/MH_03_medium_3d.png) | ![MH_04_difficult_3d](/picture/MH_04_difficult_3d.png) |
 | ![MH_03_medium](/picture/MH_03_medium.png)       | ![MH_04_difficult](/picture/MH_04_difficult.png)       |
 
