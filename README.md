@@ -49,10 +49,22 @@ cd build
 
 ## Visualization Result
 
-EuRoC Vicon Room 1 (V1_1_easy)
-![V1_1_3](/picture/V1_2_3.png)
+You can simply run the python script to load the previous map, and you can get the result down below. Try to load some existing maps that I ran already. You can also load the map in VO/ folder where you can see how much improvement the loop closure and relocalization have made.
 
-### EuRoC Vicon Room 1 (V1_2_medium)
+```
+cd scripts
+python load_map.py ../saved_maps/<map_file_path>.json
+```
+
+| EuRoC Vicon Room 1 (V1_1_easy)                   | EuRoC Vicon Room 1 (V1_2_medium)                       |
+| ------------------------------------------------ | ------------------------------------------------------ |
+| ![V1_1_easy_3d](/picture/V1_1_easy_3d.png)       | ![V1_2_medium_3d](/picture/V1_2_medium_3d.png)         |
+| ![V1_1_easy](/picture/V1_1_easy.png)             | ![V1_2_medium](/picture/V1_2_medium.png)               |
+| EuRoC Machine Hall 3 (MH_03_medium)              | EuRoC Machine Hall 4 (MH_04_difficult)                 |
+| ![MH_03_medium_3d](/picture/MH_03_medium_3d.png) | ![MH_04_difficult_3d](/picture/MH_04_difficult_3d.png) |
+| ![MH_03_medium](/picture/MH_03_medium.png)       | ![MH_04_difficult](/picture/MH_04_difficult.png)       |
+
+<!-- ### EuRoC Vicon Room 1 (V1_2_medium)
 
 ![...](/picture/...)
 
@@ -78,7 +90,7 @@ EuRoC Vicon Room 1 (V1_1_easy)
 
 ### EuRoC Machine Hall 5 (MH_05_difficult)
 
-![...](/picture/...)
+![...](/picture/...) -->
 
 ## Video Demo
 
