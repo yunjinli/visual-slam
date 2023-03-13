@@ -2,7 +2,7 @@
 
 ## Introduction
 
-Most of the implementations are inspired by the framework provided by the course [Vision-based Navigation IN2106](https://vision.in.tum.de/teaching/ws2022/visnav_ws2022) from my university (TUM). In the course, we only finished visual odometry, and I would like to add a loop closure module and relocalization module to make it become a more sophisticated SLAM sytem. For more detial about how I implement these modules in detail, please refer to my project page here [Visual-SLAM: Loop Closure and Relocalization](https://hip-fin-125.notion.site/Visual-SLAM-Loop-Closure-and-Relocalization-ef7be594875a47e598cf261b64e9b684).
+Part of the implementations are from the framework we developed during the course [Vision-based Navigation IN2106](https://vision.in.tum.de/teaching/ws2022/visnav_ws2022) from my university (TUM). In the course, we only finished visual odometry, and I would like to add a loop closure module and relocalization module to make it become a more sophisticated SLAM sytem. For more detail about how I implement these modules in detail, please refer to my project page here [Visual-SLAM: Loop Closure and Relocalization](https://hip-fin-125.notion.site/Visual-SLAM-Loop-Closure-and-Relocalization-ef7be594875a47e598cf261b64e9b684).
 
 ## Setup
 
