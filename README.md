@@ -15,6 +15,7 @@ cd visual-slam
 ./install_dependencies.sh
 ./build_submodules.sh
 ```
+
 ```
 mkdir build
 cd build
@@ -24,52 +25,82 @@ make slam
 ```
 
 ## Run
+
 Note: It's only tested to load EuRoC Machine Hall and EuRoc Vicon Room1 datasets
+
 ```
 cd build
 ./slam --dataset-path ../data/<dataset_name>/mav0/ --cam-calib ../calibration_file/<calibration_file_name>
 ```
 
 ## Quantitative Evaluation
+
 ### My SLAM
-||MH01|MH02|MH03|MH04|MH05|V1_1|V1_2|V1_3|
-|----|---|---|---|---|---|---|---|---|
-|ATE (m)|**0.200**|0.364|**0.782**|**0.890**|**1.046**|**0.090**|**0.197**|**0.551**|
+
+|         | MH01      | MH02  | MH03      | MH04      | MH05      | V1_1      | V1_2      | V1_3      |
+| ------- | --------- | ----- | --------- | --------- | --------- | --------- | --------- | --------- |
+| ATE (m) | **0.200** | 0.364 | **0.782** | **0.890** | **1.046** | **0.090** | **0.197** | **0.551** |
+
 ### Baseline VO
-||MH01|MH02|MH03|MH04|MH05|V1_1|V1_2|V1_3|
-|----|---|---|---|---|---|---|---|---|
-|ATE (m)|1.152|**0.305**|3.734|4.330|12.930|0.113|4.355|6.184|
+
+|         | MH01  | MH02      | MH03  | MH04  | MH05   | V1_1  | V1_2  | V1_3  |
+| ------- | ----- | --------- | ----- | ----- | ------ | ----- | ----- | ----- |
+| ATE (m) | 1.152 | **0.305** | 3.734 | 4.330 | 12.930 | 0.113 | 4.355 | 6.184 |
 
 ## Visualization Result
-### EuRoC Vicon Room 1 (V1_1_easy)
+
+EuRoC Vicon Room 1 (V1_1_easy)
 ![V1_1_3](/picture/V1_2_3.png)
+
 ### EuRoC Vicon Room 1 (V1_2_medium)
+
 ![...](/picture/...)
+
 ### EuRoC Vicon Room 1 (V1_3_difficult)
+
 ![...](/picture/...)
+
 ### EuRoC Machine Hall 1 (MH_01_easy)
+
 ![...](/picture/...)
+
 ### EuRoC Machine Hall 2 (MH_02_easy)
+
 ![...](/picture/...)
+
 ### EuRoC Machine Hall 3 (MH_03_medium)
+
 ![...](/picture/...)
+
 ### EuRoC Machine Hall 4 (MH_04_difficult)
+
 ![...](/picture/...)
+
 ### EuRoC Machine Hall 5 (MH_05_difficult)
+
 ![...](/picture/...)
 
 ## Video Demo
-### Vicon Room 01 02 
-[![V1_02_medium](https://img.youtube.com/vi/zQDUN82YFCg/0.jpg)](https://youtu.be/zQDUN82YFCg)
-### Vicon Room 01 03
-[![V1_03_difficult](https://img.youtube.com/vi/IGoDk9UTl5k/0.jpg)](https://youtu.be/IGoDk9UTl5k)
-### Machine Hall 03
-[![mh03_medium](https://img.youtube.com/vi/Nvl98TRlgj0/0.jpg)](https://youtu.be/Nvl98TRlgj0)
-### Machine Hall 04
-[![mh04_difficult](https://img.youtube.com/vi/__JjAmXCCao/0.jpg)](https://youtu.be/__JjAmXCCao)
-### Machine Hall 05
-[![mh05_difficult](https://img.youtube.com/vi/Ld0z8F5hdaY/0.jpg)](https://youtu.be/Ld0z8F5hdaY)
 
+### Vicon Room 01 02
+
+[![V1_02_medium](https://img.youtube.com/vi/zQDUN82YFCg/0.jpg)](https://youtu.be/zQDUN82YFCg)
+
+### Vicon Room 01 03
+
+[![V1_03_difficult](https://img.youtube.com/vi/IGoDk9UTl5k/0.jpg)](https://youtu.be/IGoDk9UTl5k)
+
+### Machine Hall 03
+
+[![mh03_medium](https://img.youtube.com/vi/Nvl98TRlgj0/0.jpg)](https://youtu.be/Nvl98TRlgj0)
+
+### Machine Hall 04
+
+[![mh04_difficult](https://img.youtube.com/vi/__JjAmXCCao/0.jpg)](https://youtu.be/__JjAmXCCao)
+
+### Machine Hall 05
+
+[![mh05_difficult](https://img.youtube.com/vi/Ld0z8F5hdaY/0.jpg)](https://youtu.be/Ld0z8F5hdaY)
 
 ## References
 
